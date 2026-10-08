@@ -46,6 +46,9 @@ class CategorizedTransaction(BaseModel):
     description: Annotated[str, StringConstraints(max_length=500)]
     vendor: Label
     category: Label
+    categorized_at: AwareDatetime
+    """When the source made this categorization: the version time. Not the relay's
+    `created_at`, which is when the relay received it and can invert order after retries."""
 
 
 class TransactionCategorized(BaseModel):

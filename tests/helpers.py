@@ -20,11 +20,11 @@ GOLDEN_BODY = (
     b'{"id":"evt_golden_0001","type":"transaction.categorized","created_at":"2026-01-01T00:00:00Z",'
     b'"data":{"entity_id":"17","transaction":{"id":"48213","account_id":"3","posted_on":"2025-12-31",'
     b'"amount":"-129.99","currency":"USD","description":"ADOBE *CREATIVE CLD","vendor":"Adobe",'
-    b'"category":"Software & Subscriptions"}}}'
+    b'"category":"Software & Subscriptions","categorized_at":"2025-12-31T18:30:00Z"}}}'
 )
 GOLDEN_TIMESTAMP = 1767225600
 GOLDEN_HEADER = (
     "t=1767225600,"
-    "v1=5c0260e6e708530371eee5149744d195bdae421dfa303aa021589751490267f6,"
-    "v1=ed80f9b2f94d6ee30741341f06c25ef8a65df0eeb13af94ecfacf55456f8c35e"
+    "v1=f88d94f867c2b622cbe717fff78855df3ff8979e16f177ffb19bd7d5cfda3994,"
+    "v1=447ac06674f179ffdcfcd0a8be6160d8ddb4fa0d3b9f439848355ce0cb94a41a"
 )

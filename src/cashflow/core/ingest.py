@@ -5,9 +5,10 @@ it commit or roll back together: if processing fails, the dedupe record disappea
 the relay's retry is processed normally instead of being mistaken for a duplicate.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 from sqlalchemy.orm import Session
 
 from cashflow.core.enums import InboundEventStatus
@@ -38,23 +39,36 @@ def ingest(session: Session, envelope: RelayEnvelope) -> IngestResult:
     if event_id is None:
         return IngestResult(repositories.inbound_event_status(session, envelope.id), duplicate=True)
 
-    outcome = _apply(session, envelope)
+    outcome = _apply(session, envelope.type, envelope.data)
     repositories.finish_inbound_event(
         session, event_id, outcome.status, entity_id=outcome.entity_id, error=outcome.error
     )
     return IngestResult(outcome.status, entity_id=outcome.entity_id)
 
 
-def _apply(session: Session, envelope: RelayEnvelope) -> _Outcome:
-    if envelope.type != TRANSACTION_CATEGORIZED:
-        return _Outcome(
-            InboundEventStatus.IGNORED, error=f"unsupported event type {envelope.type!r}"
-        )
+def reprocess_unknown_entity_events(session: Session, entity_id: str) -> list[IngestResult]:
+    """Apply events stored as `unknown_entity` now that the entity exists, oldest first.
 
-    claimed_entity = envelope.data.get("entity_id")
+    Their payloads carry their own version time (`categorized_at`), so replay order can't roll
+    a transaction back. The caller commits."""
+    results = []
+    for event in repositories.unknown_entity_events(session, entity_id):
+        outcome = _apply(session, event.type, event.payload)
+        repositories.finish_inbound_event(
+            session, event.id, outcome.status, entity_id=outcome.entity_id, error=outcome.error
+        )
+        results.append(IngestResult(outcome.status, entity_id=outcome.entity_id))
+    return results
+
+
+def _apply(session: Session, event_type: str, data: Mapping[str, JsonValue]) -> _Outcome:
+    if event_type != TRANSACTION_CATEGORIZED:
+        return _Outcome(InboundEventStatus.IGNORED, error=f"unsupported event type {event_type!r}")
+
+    claimed_entity = data.get("entity_id")
     entity_id = claimed_entity if isinstance(claimed_entity, str) else None
     try:
-        payload = TransactionCategorized.model_validate(envelope.data)
+        payload = TransactionCategorized.model_validate(data)
     except ValidationError as exc:
         return _Outcome(InboundEventStatus.INVALID, entity_id, _describe(exc))
 
@@ -67,7 +81,7 @@ def _apply(session: Session, envelope: RelayEnvelope) -> _Outcome:
         return _Outcome(InboundEventStatus.INVALID, entity.id, error)
 
     written = repositories.upsert_transactions(
-        session, [payload.to_transaction()], source_updated_at=envelope.created_at
+        session, [payload.to_transaction()], source_updated_at=payload.transaction.categorized_at
     )
     if written:
         repositories.mark_dirty(session, entity.id)

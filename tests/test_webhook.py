@@ -56,6 +56,7 @@ def payload(
     amount: object = "-129.99",
     currency: str = "USD",
     category: str = "Software & Subscriptions",
+    categorized_at: datetime = NOW,
 ) -> dict[str, Any]:
     return {
         "entity_id": entity_id,
@@ -68,6 +69,7 @@ def payload(
             "description": "ADOBE *CREATIVE CLD",
             "vendor": "Adobe",
             "category": category,
+            "categorized_at": categorized_at.isoformat(),
         },
     }
 
@@ -147,19 +149,22 @@ def test_redelivery_is_acknowledged_without_reprocessing(
     assert transaction_count(session) == 1
 
 
-def test_later_event_recategorizes_but_delayed_older_one_does_not(
-    client: TestClient, session: Session
-) -> None:
-    deliver(client, envelope(payload(category="Software"), event_id="evt-1"))
+def test_versions_follow_the_source_not_the_relay(client: TestClient, session: Session) -> None:
+    """A categorization made first but delivered last (after retries) carries the newest relay
+    `created_at`. The source's `categorized_at` decides, so it can't undo the later one."""
+    first, second = NOW - timedelta(hours=2), NOW - timedelta(hours=1)
     deliver(
         client,
-        envelope(payload(category="Marketing"), event_id="evt-2", created_at=NOW + timedelta(1)),
+        envelope(payload(category="Marketing", categorized_at=second), event_id="evt-2"),
     )
 
-    # evt-0 was emitted before both but its delivery was retried until now.
     response = deliver(
         client,
-        envelope(payload(category="Travel"), event_id="evt-0", created_at=NOW - timedelta(1)),
+        envelope(
+            payload(category="Travel", categorized_at=first),
+            event_id="evt-1",
+            created_at=NOW + timedelta(minutes=5),  # the relay saw it last
+        ),
     )
 
     assert response.json()["status"] == "processed"

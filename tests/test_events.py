@@ -18,6 +18,7 @@ def data(**overrides: Any) -> dict[str, Any]:
         "description": "ADOBE *CREATIVE CLD",
         "vendor": "Adobe",
         "category": "Software & Subscriptions",
+        "categorized_at": "2025-12-31T18:30:00Z",
     } | overrides
     return {"entity_id": "17", "transaction": transaction}
 
@@ -47,3 +48,9 @@ def test_envelope_requires_timezone_aware_created_at() -> None:
 
     with pytest.raises(ValidationError, match="created_at"):
         RelayEnvelope.model_validate_json(body)
+
+
+@pytest.mark.parametrize("categorized_at", [None, "2025-12-31T18:30:00", "yesterday"])
+def test_categorized_at_is_a_required_aware_timestamp(categorized_at: object) -> None:
+    with pytest.raises(ValidationError, match="categorized_at"):
+        TransactionCategorized.model_validate(data(categorized_at=categorized_at))

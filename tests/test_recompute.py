@@ -37,11 +37,13 @@ def entity(session: Session) -> None:
     session.commit()
 
 
-def envelope(event_id: str, created_at: datetime = NOW, amount: str = "-12.00") -> RelayEnvelope:
+def envelope(
+    event_id: str, categorized_at: datetime = NOW, amount: str = "-12.00"
+) -> RelayEnvelope:
     return RelayEnvelope(
         id=event_id,
         type=TRANSACTION_CATEGORIZED,
-        created_at=created_at,
+        created_at=NOW,
         data={
             "entity_id": ENTITY_ID,
             "transaction": {
@@ -53,6 +55,7 @@ def envelope(event_id: str, created_at: datetime = NOW, amount: str = "-12.00") 
                 "description": "",
                 "vendor": "Adobe",
                 "category": "Software",
+                "categorized_at": categorized_at.isoformat(),
             },
         },
     )
@@ -75,7 +78,7 @@ def test_unchanged_resend_does_not_mark_dirty(session: Session) -> None:
     ingest(session, envelope("evt-1"))
     repositories.claim_dirty(session, ENTITY_ID)
 
-    ingest(session, envelope("evt-2", created_at=NOW + timedelta(minutes=1)))
+    ingest(session, envelope("evt-2", categorized_at=NOW + timedelta(minutes=1)))
 
     assert not is_dirty(session)
 

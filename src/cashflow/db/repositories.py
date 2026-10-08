@@ -361,3 +361,16 @@ def prune_transactions(session: Session, entity_id: str, keep_source_ids: set[st
 
 def delete_anomalies(session: Session, entity_id: str) -> None:
     session.execute(delete(orm.Anomaly).where(orm.Anomaly.entity_id == entity_id))
+
+
+def unknown_entity_events(session: Session, entity_id: str) -> list[orm.InboundEvent]:
+    return list(
+        session.scalars(
+            select(orm.InboundEvent)
+            .where(
+                orm.InboundEvent.entity_id == entity_id,
+                orm.InboundEvent.status == InboundEventStatus.UNKNOWN_ENTITY,
+            )
+            .order_by(orm.InboundEvent.received_at, orm.InboundEvent.id)
+        )
+    )
