@@ -206,7 +206,19 @@ Details that matter:
 - `GET /entities/{id}/forecast?horizon=30|60|90`: latest stored forecast with daily points and backtest metrics (MASE, band coverage, typical balance error). 404 for unknown entities or before the first refresh, and 422 for an unconfigured horizon. Like every report endpoint, it is unauthenticated for now; API keys are on the "what I'd do next" list.
 - `GET /entities/{id}/anomalies?status=open|dismissed|resolved`: most severe first, then most recent. 404 for unknown entities.
 - `PATCH /entities/{id}/anomalies/{anomaly_id}` with `{"status": "dismissed"}` or `{"status": "open"}` to undo. Entity-scoped: another entity's anomaly id returns 404. `resolved` is set only by rescans; changing a resolved anomaly returns 409.
-- `GET /entities/{id}/summary`: weekly summary (balance outlook, top categories, open anomalies)
+- `GET /entities/{id}/summary?week_of=YYYY-MM-DD`: the weekly summary (below). 404 for unknown entities and 422 for a future or malformed week.
+
+## Weekly summary
+
+`core.summary.build_summary` is pure. The endpoint loads its inputs and returns the Pydantic `WeeklySummary` as is, so the MCP layer can reuse it. It is computed on request; nothing is stored.
+
+- **Week:** Monday to Sunday. The default is the last complete week, so on a Monday it's the week just ended. `week_of` picks the week containing that date.
+- **Cash:** start and end balance, money in, money out, and net for the week, alongside the previous week and the average of the four before it.
+- **Top discretionary categories:** the five largest non-recurring outflow categories, with each one's average week over the previous four. Recurring bills are left out, because a monthly rent payment in a weekly window always looks like a jump. There is deliberately no percentage change: monthly-billed categories swing between nothing and everything week to week, and a ratio would mislead.
+- **Coming up:** recurring bills and income scheduled in the next 7 days. Series are detected fresh, so this reflects every transaction even while a refresh is pending. Overdue charges aren't listed, since they're anomalies, not plans.
+- **Outlook:** from the latest stored forecast: the expected balance and band at each horizon with its typical backtest error, the lowest expected balance in the forecast and its date ("will I run short, and when?"), and the lowest point of the lower band. Null before the first forecast.
+- **Anomalies:** open counts by severity, how many are new since the week started, and the five most severe.
+- **Freshness:** `refresh_pending` is true while new transactions wait for a refresh, so the outlook and anomalies may lag.
 
 ## MCP server
 

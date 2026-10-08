@@ -17,6 +17,7 @@ uv run python -m cashflow.demo.seed   # two synthetic businesses, 24 months each
 uv run fastapi dev src/cashflow/api/main.py
 curl "localhost:8000/entities/demo-42/forecast?horizon=90"
 curl "localhost:8000/entities/demo-42/anomalies"
+curl "localhost:8000/entities/demo-42/summary"
 ```
 
 New transactions trigger a background refresh of the entity's recurring series, forecast, and anomaly scan. Background tasks are in-process, so a restart can drop one. The entity stays flagged, though, and this command, run from cron, catches up:

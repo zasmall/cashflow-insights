@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from sqlalchemy.orm import Session, sessionmaker
 
-from cashflow.api import anomalies, forecasts, webhooks
+from cashflow.api import anomalies, forecasts, summary, webhooks
 from cashflow.api.deps import AppContext, Clock, utc_now
 from cashflow.db.session import make_engine, make_session_factory
 from cashflow.settings import Settings
@@ -39,4 +39,5 @@ def create_app(
     app.include_router(webhooks.router)
     app.include_router(forecasts.router)
     app.include_router(anomalies.router)
+    app.include_router(summary.router)
     return app
