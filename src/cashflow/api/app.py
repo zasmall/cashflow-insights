@@ -1,13 +1,16 @@
 """Application factory. `cashflow.api.main` holds the module-level app for `fastapi dev`."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from http import HTTPStatus
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, sessionmaker
 
 from cashflow.api import anomalies, forecasts, summary, webhooks
 from cashflow.api.deps import AppContext, Clock, utc_now
+from cashflow.core.errors import InvalidRequestError, NotFoundError
 from cashflow.db.session import make_engine, make_session_factory
 from cashflow.settings import Settings
 
@@ -36,8 +39,19 @@ def create_app(
 
     app = FastAPI(title="Cashflow Insights", lifespan=lifespan)
     app.state.context = AppContext(settings, session_factory, clock)
+    app.add_exception_handler(NotFoundError, _error_handler(HTTPStatus.NOT_FOUND))
+    app.add_exception_handler(InvalidRequestError, _error_handler(HTTPStatus.UNPROCESSABLE_CONTENT))
     app.include_router(webhooks.router)
     app.include_router(forecasts.router)
     app.include_router(anomalies.router)
     app.include_router(summary.router)
     return app
+
+
+def _error_handler(status: HTTPStatus) -> Callable[[Request, Exception], Awaitable[JSONResponse]]:
+    """Core read services raise domain errors; HTTP is only decided here."""
+
+    async def handle(_: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=status)
+
+    return handle
