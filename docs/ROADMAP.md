@@ -40,9 +40,10 @@
 - [x] README section on connecting it to Claude Desktop / Claude Code
 
 ## M8 — Integration
-- [ ] Register as an endpoint on the Webhook Relay; categorizer emits `transaction.categorized`
-- [ ] End-to-end demo across the three repos (docker compose or script)
-- [ ] Entity provisioning CLI, plus reprocessing of stored `unknown_entity` events
+- [x] Register as an endpoint on the Webhook Relay; categorizer emits `transaction.categorized` (categorizer branch `feat/publish-categorized`)
+- [x] End-to-end demo across the three repos (`scripts/e2e-demo.sh` + `docs/DEMO.md`)
+- [x] Entity provisioning CLI, plus reprocessing of stored `unknown_entity` events
+- [x] Version transactions by the source's `categorized_at`, not the relay's receive time
 
 ## M9 — Portfolio polish
 - [ ] README: problem, system diagram, forecasting approach and backtest accuracy, key decisions, how to run, "what I'd do next"
