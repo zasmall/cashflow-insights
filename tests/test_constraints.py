@@ -79,8 +79,8 @@ def test_anomaly_fingerprint_is_unique_per_entity(session: Session) -> None:
 def test_forecast_band_must_contain_expected(session: Session) -> None:
     forecast_id = session.execute(
         text(
-            "INSERT INTO forecasts (entity_id, horizon_days, model)"
-            " VALUES (:e, 30, 'AutoETS') RETURNING id"
+            "INSERT INTO forecasts (entity_id, horizon_days, as_of, starting_balance, model)"
+            " VALUES (:e, 30, '2026-01-31', 1000, 'AutoETS') RETURNING id"
         ),
         {"e": ENTITY_ID},
     ).scalar_one()

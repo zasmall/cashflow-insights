@@ -3,7 +3,7 @@
     uv run python -m cashflow.demo.seed [--entities 2] [--seed 42] [--as-of 2026-10-08]
 
 Idempotent: generated ids are deterministic, so re-running with the same arguments writes no
-transactions. Recurring series are re-detected each run.
+transactions. Recurring series and forecasts are recomputed each run.
 """
 
 import argparse
@@ -12,11 +12,11 @@ from datetime import UTC, date, datetime
 
 from sqlalchemy.orm import Session
 
-from cashflow.core.refresh import refresh_recurring
+from cashflow.core.refresh import refresh_entity
 from cashflow.db.repositories import upsert_entity, upsert_transactions
 from cashflow.db.session import make_engine, make_session_factory, session_scope
 from cashflow.demo.generator import DEFAULT_MONTHS, generate
-from cashflow.settings import RecurringSettings, get_settings
+from cashflow.settings import Settings, get_settings
 
 
 @dataclass(frozen=True)
@@ -26,6 +26,7 @@ class SeededEntity:
     transactions: int
     written: int
     recurring_series: int
+    forecast_model: str
 
 
 def seed(
@@ -34,7 +35,7 @@ def seed(
     entities: int,
     base_seed: int,
     as_of: date,
-    recurring: RecurringSettings,
+    settings: Settings,
     months: int = DEFAULT_MONTHS,
 ) -> list[SeededEntity]:
     """Seed `entities` businesses using consecutive seeds. The caller commits."""
@@ -49,14 +50,15 @@ def seed(
             # lets a changed generator overwrite older rows; identical rows still write nothing.
             source_updated_at=datetime.now(UTC),
         )
-        series = refresh_recurring(session, dataset.entity.id, as_of=as_of, settings=recurring)
+        refreshed = refresh_entity(session, dataset.entity.id, as_of=as_of, settings=settings)
         results.append(
             SeededEntity(
                 dataset.entity.id,
                 dataset.entity.name,
                 len(dataset.transactions),
                 written,
-                len(series),
+                len(refreshed.series),
+                refreshed.forecast.model.value,
             )
         )
     return results
@@ -84,7 +86,7 @@ def main(argv: list[str] | None = None) -> None:
                 entities=args.entities,
                 base_seed=args.seed,
                 as_of=args.as_of,
-                recurring=settings.recurring,
+                settings=settings,
                 months=args.months,
             )
     finally:
@@ -93,7 +95,7 @@ def main(argv: list[str] | None = None) -> None:
     for r in results:
         print(
             f"{r.entity_id}  {r.name:<28} {r.transactions:>5} transactions ({r.written} written), "
-            f"{r.recurring_series} recurring series"
+            f"{r.recurring_series} recurring series, forecast with {r.forecast_model}"
         )
 
 

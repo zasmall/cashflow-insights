@@ -12,6 +12,7 @@ from sqlalchemy import (
     CheckConstraint,
     ForeignKey,
     Index,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -36,6 +37,8 @@ class Entity(TimestampMixin, Base):
     currency: Mapped[str] = mapped_column(String(3))
     opening_balance: Mapped[Money]
     opening_balance_on: Mapped[date]
+    # Set when new transactions arrive; cleared when a refresh claims the entity.
+    dirty_since: Mapped[datetime | None]
 
 
 class InboundEvent(Base):
@@ -94,6 +97,7 @@ class RecurringSeries(TimestampMixin, Base):
     cadence: Mapped[Cadence] = mapped_column(str_enum(Cadence, "cadence"))
     next_expected_on: Mapped[date]
     last_seen_on: Mapped[date]
+    anchor_day: Mapped[int | None] = mapped_column(SmallInteger)
 
 
 class Forecast(Base):
@@ -107,9 +111,13 @@ class Forecast(Base):
     entity_id: Mapped[EntityFk]
     generated_at: Mapped[datetime] = mapped_column(server_default=func.now())
     horizon_days: Mapped[int]
+    as_of: Mapped[date]
+    starting_balance: Mapped[Money]
     model: Mapped[str] = mapped_column(String(50))
-    # A model-quality metric, not money, so float is appropriate. Null when history is too short.
+    # Model-quality metrics, not money, so float is appropriate. Null when history is too short.
     backtest_mase: Mapped[float | None]
+    backtest_coverage: Mapped[float | None]
+    backtest_balance_error: Mapped[Money | None]
 
     points: Mapped[list["ForecastPoint"]] = relationship(
         back_populates="forecast",

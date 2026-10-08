@@ -2,14 +2,16 @@
 
 from collections.abc import Iterable, Sequence
 from datetime import datetime
+from decimal import Decimal
 from itertools import batched
 
 from sqlalchemy import delete, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from cashflow.core.enums import InboundEventStatus
 from cashflow.core.events import RelayEnvelope
+from cashflow.core.forecast import ForecastRun, History
 from cashflow.core.models import Entity, Transaction
 from cashflow.core.recurring import DetectedSeries
 from cashflow.db import models as orm
@@ -137,7 +139,95 @@ def replace_recurring_series(
                     "cadence": s.cadence,
                     "next_expected_on": s.next_expected_on,
                     "last_seen_on": s.last_seen_on,
+                    "anchor_day": s.anchor_day,
                 }
                 for s in series
             ],
         )
+
+
+def entity_history(session: Session, entity_id: str) -> History | None:
+    entity = session.get(orm.Entity, entity_id)
+    if entity is None:
+        return None
+    return History(
+        transactions=entity_transactions(session, entity_id),
+        opening_balance=entity.opening_balance,
+        opening_balance_on=entity.opening_balance_on,
+    )
+
+
+def save_forecast(session: Session, entity_id: str, run: ForecastRun) -> None:
+    """Replace the entity's forecasts with this run: one row per horizon, points cascade."""
+    session.execute(delete(orm.Forecast).where(orm.Forecast.entity_id == entity_id))
+    for horizon in run.horizons:
+        forecast_id = session.execute(
+            insert(orm.Forecast)
+            .values(
+                entity_id=entity_id,
+                horizon_days=horizon.horizon_days,
+                as_of=run.as_of,
+                starting_balance=run.starting_balance,
+                model=run.model.value,
+                backtest_mase=horizon.backtest.mase if horizon.backtest else None,
+                backtest_coverage=horizon.backtest.coverage if horizon.backtest else None,
+                backtest_balance_error=(
+                    Decimal(horizon.backtest.balance_error).quantize(Decimal("0.01"))
+                    if horizon.backtest
+                    else None
+                ),
+            )
+            .returning(orm.Forecast.id)
+        ).scalar_one()
+        session.execute(
+            insert(orm.ForecastPoint),
+            [
+                {
+                    "forecast_id": forecast_id,
+                    "on_date": p.on_date,
+                    "expected_balance": p.expected,
+                    "lower": p.lower,
+                    "upper": p.upper,
+                }
+                for p in horizon.points
+            ],
+        )
+
+
+def latest_forecast(session: Session, entity_id: str, horizon_days: int) -> orm.Forecast | None:
+    return session.scalars(
+        select(orm.Forecast)
+        .where(orm.Forecast.entity_id == entity_id, orm.Forecast.horizon_days == horizon_days)
+        .order_by(orm.Forecast.generated_at.desc(), orm.Forecast.id.desc())
+        .options(selectinload(orm.Forecast.points))
+        .limit(1)
+    ).one_or_none()
+
+
+def mark_dirty(session: Session, entity_id: str) -> None:
+    """Flag the entity for recompute, keeping the earliest pending time."""
+    session.execute(
+        update(orm.Entity)
+        .where(orm.Entity.id == entity_id, orm.Entity.dirty_since.is_(None))
+        .values(dirty_since=func.now())
+    )
+
+
+def claim_dirty(session: Session, entity_id: str) -> bool:
+    """Atomically clear the flag. Exactly one concurrent caller gets True per dirty period."""
+    claimed = session.execute(
+        update(orm.Entity)
+        .where(orm.Entity.id == entity_id, orm.Entity.dirty_since.is_not(None))
+        .values(dirty_since=None)
+        .returning(orm.Entity.id)
+    ).scalar_one_or_none()
+    return claimed is not None
+
+
+def dirty_entity_ids(session: Session) -> list[str]:
+    stmt = select(orm.Entity.id).where(orm.Entity.dirty_since.is_not(None)).order_by(orm.Entity.id)
+    return list(session.scalars(stmt))
+
+
+def entity_ids(session: Session) -> list[str]:
+    return list(session.scalars(select(orm.Entity.id).order_by(orm.Entity.id)))

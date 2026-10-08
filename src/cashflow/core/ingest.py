@@ -23,6 +23,7 @@ class IngestResult:
     status: InboundEventStatus
     duplicate: bool = False
     """True when this event was received before; `status` is then the original outcome."""
+    entity_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -41,7 +42,7 @@ def ingest(session: Session, envelope: RelayEnvelope) -> IngestResult:
     repositories.finish_inbound_event(
         session, event_id, outcome.status, entity_id=outcome.entity_id, error=outcome.error
     )
-    return IngestResult(outcome.status)
+    return IngestResult(outcome.status, entity_id=outcome.entity_id)
 
 
 def _apply(session: Session, envelope: RelayEnvelope) -> _Outcome:
@@ -65,9 +66,11 @@ def _apply(session: Session, envelope: RelayEnvelope) -> _Outcome:
         error = f"currency {payload.transaction.currency} does not match entity's {entity.currency}"
         return _Outcome(InboundEventStatus.INVALID, entity.id, error)
 
-    repositories.upsert_transactions(
+    written = repositories.upsert_transactions(
         session, [payload.to_transaction()], source_updated_at=envelope.created_at
     )
+    if written:
+        repositories.mark_dirty(session, entity.id)
     return _Outcome(InboundEventStatus.PROCESSED, entity.id)
 
 
