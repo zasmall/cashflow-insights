@@ -28,8 +28,8 @@
 - [x] `GET /entities/{id}/forecast`
 
 ## M5 — Anomaly detection
-- [ ] All five rules as pure functions, each with tests
-- [ ] Idempotent scan; anomaly endpoints (list, dismiss)
+- [x] All five rules as pure functions, each with tests
+- [x] Idempotent scan; anomaly endpoints (list, dismiss)
 
 ## M6 — Summary
 - [ ] `GET /entities/{id}/summary` weekly report
