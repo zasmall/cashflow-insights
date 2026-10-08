@@ -12,6 +12,7 @@ from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from random import Random
 
+from cashflow.core.calendar import add_months
 from cashflow.core.enums import AnomalyType, Cadence
 from cashflow.core.models import Entity, Transaction
 
@@ -104,14 +105,6 @@ def generate(seed: int, as_of: date, months: int = DEFAULT_MONTHS) -> DemoDatase
         msg = f"months must be at least {MIN_MONTHS} to leave room for planted anomalies"
         raise ValueError(msg)
     return _Generator(seed, as_of, months).build()
-
-
-def add_months(d: date, months: int) -> date:
-    """Shift by whole months, clamping the day to the target month's length."""
-    month_index = d.year * 12 + d.month - 1 + months
-    year, month = divmod(month_index, 12)
-    last_day = calendar.monthrange(year, month + 1)[1]
-    return date(year, month + 1, min(d.day, last_day))
 
 
 def _money(value: float) -> Decimal:

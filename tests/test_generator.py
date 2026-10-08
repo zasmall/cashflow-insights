@@ -4,7 +4,6 @@ Detection tests in M3 and M5 rely on this: if the generator says it planted one 
 charge, there must be exactly one, and no accidental ones.
 """
 
-import calendar
 from collections import defaultdict
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
@@ -15,7 +14,7 @@ from hypothesis import strategies as st
 
 from cashflow.core.enums import AnomalyType
 from cashflow.core.models import Transaction
-from cashflow.demo.generator import DemoDataset, add_months, generate
+from cashflow.demo.generator import DemoDataset, generate
 
 if TYPE_CHECKING:
     from decimal import Decimal
@@ -129,11 +128,3 @@ def test_planted_anomalies_have_their_defining_shape(seed: int, as_of: date, mon
 
     spike = planted(ds, AnomalyType.CATEGORY_SPIKE)
     assert len({(t.posted_on.year, t.posted_on.month) for t in spike}) == 1
-
-
-@given(st.dates(min_value=date(1900, 1, 1), max_value=date(2100, 1, 1)), st.integers(-240, 240))
-def test_add_months_shifts_month_and_clamps_day(d: date, months: int) -> None:
-    result = add_months(d, months)
-
-    assert (result.year * 12 + result.month) - (d.year * 12 + d.month) == months
-    assert result.day == min(d.day, calendar.monthrange(result.year, result.month)[1])
