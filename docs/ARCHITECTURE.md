@@ -18,10 +18,10 @@ Event type `transaction.categorized`. The payload must be agreed with the catego
 
 ```json
 {
-  "entity_id": "01J...",
+  "entity_id": "17",
   "transaction": {
-    "id": "01J...",
-    "account_id": "01J...",
+    "id": "48213",
+    "account_id": "3",
     "posted_on": "2026-10-01",
     "amount": "-129.99",
     "currency": "USD",
@@ -34,17 +34,27 @@ Event type `transaction.categorized`. The payload must be agreed with the catego
 
 Negative amounts are outflows. Amounts are decimal strings and never floats.
 
+**Identifiers are opaque strings** (up to 64 chars). The categorizer currently uses auto-increment integers (`entity_id` is its `client_id`, `account_id` its `bank_account_id`), but nothing here parses or assumes a format, so its ID scheme can change without breaking ingest. The field mapping is finalized in M8.
+
 ## Data model
 
 | Table | Key columns | Notes |
 |---|---|---|
-| `entities` | id, name, opening_balance, opening_balance_on | One client business |
-| `inbound_events` | relay_event_id (unique), type, received_at, processed_at | Dedupe log |
-| `transactions` | id, entity_id, account_id, posted_on, amount, vendor, category, description | Upsert by source transaction id |
-| `recurring_series` | id, entity_id, vendor, typical_amount, cadence, next_expected_on, last_seen_on | Detected recurring bills/income |
+| `entities` | id, name, currency, opening_balance, opening_balance_on | One client business. `id` is the upstream id; `currency` is ISO 4217 |
+| `inbound_events` | relay_event_id (unique), type, payload (JSONB), received_at, processed_at | Dedupe log; raw payload kept for replay and debugging |
+| `transactions` | id, entity_id, source_id, account_id, posted_on, amount, vendor, category, description | Upsert on unique `(entity_id, source_id)` |
+| `recurring_series` | id, entity_id, vendor, typical_amount, cadence, next_expected_on, last_seen_on | Detected recurring bills/income; recomputed per entity, so no natural key |
 | `forecasts` | id, entity_id, generated_at, horizon_days, model, backtest_mase | Header row per run |
-| `forecast_points` | forecast_id, on_date, expected_balance, lower, upper | Daily points |
-| `anomalies` | id, entity_id, type, severity, explanation, transaction_ids (array), detected_at, status | Status: open, dismissed |
+| `forecast_points` | (forecast_id, on_date), expected_balance, lower, upper | Daily points; CHECK `lower <= expected <= upper` |
+| `anomalies` | id, entity_id, type, severity, explanation, transaction_ids (array), fingerprint, detected_at, status, dismissed_at | Unique `(entity_id, fingerprint)` |
+
+Conventions:
+
+- **Keys:** upstream identifiers (`entities.id`, `source_id`, `account_id`) are `VARCHAR(64)`. This service's own rows use `BIGINT` identity keys.
+- **Types:** money is `NUMERIC(14,2)`; timestamps are `TIMESTAMPTZ`; business dates are `DATE`.
+- **Enums** (`cadence`, anomaly `type`/`severity`/`status`) are `VARCHAR` with a CHECK constraint rather than native Postgres enums, which are awkward to alter in migrations. The Python `StrEnum`s live in `core.enums`.
+- **Scoping:** every entity-owned table has an `entity_id` foreign key with `ON DELETE CASCADE`.
+- **Anomaly idempotency:** each rule computes a `fingerprint` (a hash of the type and its evidence). The unique constraint means a rescan can neither duplicate an open anomaly nor resurrect a dismissed one.
 
 ## Ingest flow
 
