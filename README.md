@@ -13,8 +13,15 @@ cp .env.example .env                  # then set WEBHOOK__SECRET (the API won't 
 uv sync
 docker compose up -d
 uv run alembic upgrade head
-uv run python -m cashflow.demo.seed   # two synthetic businesses, 24 months each
+uv run python -m cashflow.demo.seed   # two synthetic businesses, 24 months each, with forecasts
 uv run fastapi dev src/cashflow/api/main.py
+curl "localhost:8000/entities/demo-42/forecast?horizon=90"
+```
+
+New transactions trigger a background refresh of the entity's recurring series and forecast. Background tasks are in-process, so a restart can drop one. The entity stays flagged, though, and this command, run from cron, catches up:
+
+```bash
+uv run python -m cashflow.refresh --dirty    # or --entity ID, or --all
 ```
 
 Checks (all run in CI):

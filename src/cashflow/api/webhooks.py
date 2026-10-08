@@ -9,13 +9,14 @@ or trust problems get an error status.
 from http import HTTPStatus
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, ValidationError
 
-from cashflow.api.deps import ClockDep, SessionDep, SettingsDep
+from cashflow.api.deps import AppContext, ContextDep, SessionDep, SettingsDep
 from cashflow.core.enums import InboundEventStatus
 from cashflow.core.events import RelayEnvelope
 from cashflow.core.ingest import ingest
+from cashflow.core.refresh import refresh_if_dirty
 from cashflow.core.signature import SignatureError, verify
 
 router = APIRouter(tags=["webhooks"])
@@ -53,18 +54,19 @@ async def raw_body(request: Request, settings: SettingsDep) -> bytes:
 def receive_relay_event(
     body: Annotated[bytes, Depends(raw_body)],
     session: SessionDep,
-    settings: SettingsDep,
-    clock: ClockDep,
+    context: ContextDep,
+    background: BackgroundTasks,
     x_relay_signature: Annotated[str | None, Header()] = None,
 ) -> IngestResponse:
     if x_relay_signature is None:
         raise HTTPException(HTTPStatus.UNAUTHORIZED, "missing X-Relay-Signature header")
+    settings = context.settings
     try:
         verify(
             x_relay_signature,
             body,
             settings.webhook.secret.get_secret_value(),
-            now=int(clock().timestamp()),
+            now=int(context.clock().timestamp()),
             tolerance_seconds=settings.webhook.signature_tolerance_seconds,
         )
     except SignatureError as exc:
@@ -77,4 +79,17 @@ def receive_relay_event(
 
     result = ingest(session, envelope)
     session.commit()  # before responding: a 200 must mean the event is durably recorded
+    if result.status is InboundEventStatus.PROCESSED and result.entity_id and not result.duplicate:
+        background.add_task(_refresh_after_ingest, context, result.entity_id)
     return IngestResponse(status=result.status, duplicate=result.duplicate)
+
+
+def _refresh_after_ingest(context: AppContext, entity_id: str) -> None:
+    """Runs after the response. In-process, so a restart can drop it, but the entity stays
+    dirty until a refresh succeeds and `python -m cashflow.refresh --dirty` catches up."""
+    refresh_if_dirty(
+        context.session_factory,
+        entity_id,
+        as_of=context.clock().date(),
+        settings=context.settings,
+    )

@@ -305,3 +305,21 @@ def test_failure_mid_ingest_commits_nothing_so_retry_succeeds(
 def test_app_refuses_to_start_without_a_secret() -> None:
     with pytest.raises(ValueError, match="WEBHOOK__SECRET"):
         create_app(Settings(_env_file=None))
+
+
+def test_processed_event_refreshes_the_entity_in_the_background(
+    client: TestClient, session: Session
+) -> None:
+    deliver(client, envelope())  # TestClient runs background tasks before returning
+
+    session.expire_all()
+    entity = session.get(orm.Entity, ENTITY_ID)
+    assert entity is not None
+    assert entity.dirty_since is None
+    assert repositories.latest_forecast(session, ENTITY_ID, 30) is not None
+
+
+def test_rejected_events_do_not_trigger_a_refresh(client: TestClient, session: Session) -> None:
+    deliver(client, envelope(payload(amount=-129.99)))
+
+    assert repositories.latest_forecast(session, ENTITY_ID, 30) is None
