@@ -32,7 +32,7 @@
 - [x] Idempotent scan; anomaly endpoints (list, dismiss)
 
 ## M6 — Summary
-- [ ] `GET /entities/{id}/summary` weekly report
+- [x] `GET /entities/{id}/summary` weekly report
 
 ## M7 — MCP server
 - [ ] FastMCP server with the six read-only tools
