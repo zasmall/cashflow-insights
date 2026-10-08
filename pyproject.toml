@@ -1,0 +1,93 @@
+[project]
+name = "cashflow"
+version = "0.1.0"
+description = "Cash flow forecasting and anomaly detection over categorized transactions, with a FastAPI and MCP interface."
+readme = "README.md"
+authors = [
+    { name = "ZASmall", email = "zasmall@users.noreply.github.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "alembic>=1.20.0",
+    "fastapi[standard]>=0.143.0",
+    "mcp>=2.3.0",
+    "polars>=2.0.0",
+    "psycopg[binary]>=3.3.6",
+    "pydantic>=2.14.0",
+    "pydantic-settings>=2.15.0",
+    "sqlalchemy>=2.1.4",
+    "statsforecast>=2.1.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.168.5",
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "B",        # bugbear
+    "UP",       # pyupgrade
+    "SIM",      # simplify
+    "C4",       # comprehensions
+    "PTH",      # pathlib
+    "RUF",      # ruff-specific
+    "N",        # pep8-naming
+    "S",        # bandit
+    "DTZ",      # naive datetimes
+    "TC",       # type-checking imports
+    "ANN",      # annotations
+    "PL",       # pylint
+]
+ignore = [
+    "PLR0913",  # too many arguments: services take injected deps
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "PLR2004", "ANN"]
+"migrations/**" = ["ANN"]
+
+[tool.ruff.lint.flake8-type-checking]
+runtime-evaluated-base-classes = [
+    "pydantic.BaseModel",
+    "pydantic_settings.BaseSettings",
+    "sqlalchemy.orm.DeclarativeBase",
+]
+
+[tool.mypy]
+strict = true
+python_version = "3.13"
+files = ["src", "tests"]
+plugins = ["pydantic.mypy"]
+warn_unreachable = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+[[tool.mypy.overrides]]
+module = ["statsforecast.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers", "--strict-config", "-p", "no:fugue"]
+markers = [
+    "db: requires a running PostgreSQL (DATABASE_URL)",
+]
