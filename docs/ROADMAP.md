@@ -22,10 +22,10 @@
 - [x] Property tests: generated series are recovered; noise isn't mistaken for a series
 
 ## M4 — Forecasting
-- [ ] Recurring projection + statsforecast residual model
-- [ ] Balance series with confidence bands
-- [ ] Rolling-origin backtest; MASE stored per run
-- [ ] `GET /entities/{id}/forecast`
+- [x] Recurring projection + statsforecast residual model
+- [x] Balance series with confidence bands
+- [x] Rolling-origin backtest; MASE stored per run
+- [x] `GET /entities/{id}/forecast`
 
 ## M5 — Anomaly detection
 - [ ] All five rules as pure functions, each with tests
