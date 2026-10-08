@@ -199,7 +199,7 @@ def test_forecast_beats_a_flat_balance_further_out(
     held_out: dict[int, dict[str, list[float]]], days: int, max_ratio: float
 ) -> None:
     """At 30 days lumpy client revenue dominates and a flat guess is as good, so only 60 and
-    90 days are asserted. Measured on these seeds: 0.96x and 0.59x the flat error. The 60-day
+    90 days are asserted. Measured on these seeds: 0.98x and 0.58x the flat error. The 60-day
     margin is thin; it is deterministic, but a generator change can legitimately move it."""
     errors = held_out[days]
 

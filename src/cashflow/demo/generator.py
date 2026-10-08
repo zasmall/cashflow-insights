@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from random import Random
+from statistics import median
 
 from cashflow.core.calendar import add_months
 from cashflow.core.enums import AnomalyType, Cadence
@@ -21,9 +22,11 @@ MIN_MONTHS = 6
 DEFAULT_MONTHS = 24
 CURRENCY = "USD"
 SATURDAY = 5
-RESTOCK_DAYS = 7
 # Random charges never repeat a vendor + amount this close together; only planted ones do.
 DUPLICATE_GUARD_DAYS = 14
+# Random discretionary spend never exceeds this multiple of its category's trailing typical
+# month, so the only category spike is the planted one.
+MONTHLY_SPEND_CAP = Decimal("1.75")
 
 BUSINESS_NAMES = (
     "Brightline Design Studio",
@@ -98,6 +101,8 @@ class _Draft:
     description: str
     account: str
     tags: set[AnomalyType] = field(default_factory=set)
+    protected: bool = False
+    """Never dropped by the monthly cap (the guaranteed restock)."""
 
 
 def generate(seed: int, as_of: date, months: int = DEFAULT_MONTHS) -> DemoDataset:
@@ -142,6 +147,7 @@ class _Generator:
         self._add_client_revenue()
         self._add_cloud_hosting()
         self._add_variable_spend()
+        self._cap_discretionary_months()
 
         self._plant_price_increase("Adobe")
         self._plant_missed_bill("Google Workspace")
@@ -252,15 +258,53 @@ class _Generator:
         day = self.start
         while day <= self.as_of:
             weekend = day.weekday() >= SATURDAY
+            if day.day == 1:
+                # A restock at the start of every month, so supplies always have a baseline.
+                restock = -_money(self.rng.uniform(40, 120))
+                vendor = self.rng.choice(("Staples", "Office Depot"))
+                self._add(day, restock, vendor, "Office Supplies")
+                self.drafts[-1].protected = True
             for category, vendors, p_weekday, p_weekend, (low, high) in VARIABLE_SPEND:
                 p = p_weekend if weekend else p_weekday
-                if category == "Office Supplies" and day.day <= RESTOCK_DAYS:
-                    p *= 2  # restocking at the start of each month
                 if self.rng.random() < p:
                     vendor = self.rng.choice(vendors)
                     amount = -_money(self.rng.uniform(low, high))
                     self._add(day, amount, vendor, category)
             day += timedelta(days=1)
+
+    def _cap_discretionary_months(self) -> None:
+        """Keep each discretionary month within MONTHLY_SPEND_CAP x its trailing 6-month median.
+
+        Freak months (say 14 fuel stops where 5 is normal) would be real category spikes, so
+        they can't appear by chance in data whose ground truth must be exact. Months are capped
+        in order, against already-capped history, by dropping their latest charges. (Shrinking
+        charges instead would create runs of identical amounts that look recurring.) The window
+        matches the one the spike rule compares against."""
+        categories = {category for category, *_ in VARIABLE_SPEND}
+        by_month: dict[tuple[str, date], list[_Draft]] = defaultdict(list)
+        for draft in self.drafts:
+            if draft.category in categories:
+                by_month[(draft.category, _month_start(draft.posted_on))].append(draft)
+
+        def spend(category: str, month: date) -> Decimal:
+            return -sum((d.amount for d in by_month.get((category, month), [])), Decimal(0))
+
+        month = _month_start(self.start)
+        while month <= self.as_of:
+            trailing = [add_months(month, -k) for k in range(1, 7)]
+            for category in sorted(categories):
+                typical = Decimal(median(spend(category, m) for m in trailing))
+                drafts = sorted(
+                    (d for d in by_month.get((category, month), []) if not d.protected),
+                    key=lambda d: d.posted_on,
+                )
+                while (
+                    typical > 0 and drafts and spend(category, month) > typical * MONTHLY_SPEND_CAP
+                ):
+                    dropped = drafts.pop()
+                    by_month[(category, month)].remove(dropped)
+                    self.drafts.remove(dropped)
+            month = add_months(month, 1)
 
     def _break_accidental_duplicates(self) -> None:
         """Nudge random charges that repeat a vendor + amount within a fortnight of another.
@@ -316,12 +360,16 @@ class _Generator:
             )
 
     def _plant_category_spike(self, category: str) -> None:
-        """A burst of large purchases in the last complete calendar month."""
+        """A burst of large purchases in the last complete calendar month.
+
+        Vendors rotate so none gets more than two: four similar charges from one vendor a few
+        days apart would pass as a weekly series and hide the spike as "recurring"."""
         month = add_months(_month_start(self.as_of), -1)
-        for _ in range(5):
+        vendors = ("Amazon", "Staples", "Office Depot")
+        for n in range(5):
             posted_on = month + timedelta(days=self.rng.randint(8, 27))
             amount = -_money(self.rng.uniform(400, 750))
-            self._add(posted_on, amount, "Amazon", category, tag=AnomalyType.CATEGORY_SPIKE)
+            self._add(posted_on, amount, vendors[n % 3], category, tag=AnomalyType.CATEGORY_SPIKE)
 
     def _plant_new_vendor_large(self) -> None:
         posted_on = self.as_of - timedelta(days=self.rng.randint(3, 6))
