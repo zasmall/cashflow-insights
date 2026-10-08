@@ -42,3 +42,11 @@ class InboundEventStatus(StrEnum):
     """Signed by the relay but unusable; `error` says why. Retrying can't fix it."""
     UNKNOWN_ENTITY = "unknown_entity"
     """For an entity not provisioned here yet. Kept so it can be reprocessed later."""
+
+
+class ForecastModel(StrEnum):
+    """Candidate models for residual (non-recurring) daily flow. Each produces intervals."""
+
+    AUTO_ETS = "AutoETS"
+    SEASONAL_NAIVE = "SeasonalNaive"
+    HISTORIC_AVERAGE = "HistoricAverage"

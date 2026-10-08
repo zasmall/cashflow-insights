@@ -55,11 +55,11 @@ Negative amounts are outflows. Amounts are decimal strings and never floats.
 
 | Table | Key columns | Notes |
 |---|---|---|
-| `entities` | id, name, currency, opening_balance, opening_balance_on | One client business. `id` is the upstream id; `currency` is ISO 4217 |
+| `entities` | id, name, currency, opening_balance, opening_balance_on, dirty_since | One client business. `id` is the upstream id; `currency` is ISO 4217; `dirty_since` flags a pending recompute |
 | `inbound_events` | relay_event_id (unique), type, payload (JSONB), status, entity_id, error, received_at, processed_at | Dedupe log and outcome. `entity_id` has no FK so events for unprovisioned entities can be kept |
 | `transactions` | id, entity_id, source_id, account_id, posted_on, amount, vendor, category, description, source_updated_at | Upsert on unique `(entity_id, source_id)`; never replaced by an older version |
-| `recurring_series` | id, entity_id, vendor, typical_amount, cadence, next_expected_on, last_seen_on | Detected recurring bills/income; recomputed per entity, so no natural key |
-| `forecasts` | id, entity_id, generated_at, horizon_days, model, backtest_mase | Header row per run |
+| `recurring_series` | id, entity_id, vendor, typical_amount, cadence, anchor_day, next_expected_on, last_seen_on | Detected recurring bills/income; recomputed per entity, so no natural key. `anchor_day` is null for weekly cadences |
+| `forecasts` | id, entity_id, generated_at, horizon_days, as_of, starting_balance, model, backtest_mase, backtest_coverage, backtest_balance_error | One row per horizon from one fitted model; only the latest run is kept |
 | `forecast_points` | (forecast_id, on_date), expected_balance, lower, upper | Daily points; CHECK `lower <= expected <= upper` |
 | `anomalies` | id, entity_id, type, severity, explanation, transaction_ids (array), fingerprint, detected_at, status, dismissed_at | Unique `(entity_id, fingerprint)` |
 
@@ -105,15 +105,41 @@ Problems that a retry can't fix answer 200 and are recorded with a reason, so on
 
 **Unknown entities:** entities are provisioned here (for now, by the seeder) rather than created from events. Events for an unknown entity are stored as `unknown_entity` with their payload, ready to be reprocessed once it exists.
 
-**Recompute trigger:** marking the entity dirty, so recurring detection, the forecast, and the anomaly scan re-run, arrives with M4/M5, when there is something to recompute. It starts with FastAPI `BackgroundTasks`, noted as a scaling limit in the README.
+**Recompute trigger:** when a processed event actually changes a transaction, ingest sets `entities.dirty_since` in the same transaction. After the response, a FastAPI `BackgroundTasks` job claims the entity atomically (`UPDATE ... SET dirty_since = NULL WHERE dirty_since IS NOT NULL RETURNING`) and refreshes it: recurring detection, then the forecast, and from M5 the anomaly scan. The claim and the refresh share one transaction:
+
+- **Bursts:** of many events for one entity, one task wins the claim and the rest do nothing. An event that lands mid-refresh re-marks the entity for the next task.
+- **Failures:** if a refresh fails, the claim rolls back too, so the entity stays dirty.
+- **Restarts:** background tasks are in-process and die with the server, but the flag survives. `python -m cashflow.refresh --dirty`, run from cron, is the safety net. A durable job queue is the scaling path; see the README.
 
 ## Forecasting
 
-1. **Recurring detection:** see below.
-2. **Known flows:** project recurring series forward on their cadence.
-3. **Residual flows:** aggregate the remaining non-recurring net flow per day and forecast it with statsforecast (for example AutoETS). Prediction intervals give the bands.
-4. **Balance:** take the opening/current balance plus cumulative (recurring + residual), with the residual bands carried through.
-5. **Backtest:** use a rolling-origin evaluation and store the MASE on each forecast run. Report it in the API and README, since an honest accuracy number is a senior signal.
+`core.forecast.build_forecast` is pure: it takes an entity's history and returns a run with one fitted model and a forecast for each configured horizon (30/60/90 days). `refresh_entity` stores it. The pipeline at any cutoff date:
+
+1. **Known flows:** detect recurring series (below) in the history up to the cutoff and project them over the horizon on their cadence and anchor day, at `typical_amount`. Overdue series resume from their next scheduled date, so the forecast assumes bills continue, the cautious choice for cash planning; M5 flags the miss. Known flows are treated as certain. A recent price change is projected at the median (old) amount until it becomes the norm; M5 flags it.
+2. **Residual flows:** every transaction from a (vendor, direction) without a series, summed per day with zeros for quiet days, forecast by a statsforecast model with a prediction interval.
+3. **Balance:** starting balance (opening balance plus all transactions to date) plus cumulative (known + residual mean). For the band, the model's one-step interval gives a daily standard deviation, and days are treated as independent and equally uncertain, so the band grows with √days.
+
+**Why one-step spread:** later model intervals already accumulate uncertainty, so adding them up counts it twice. In backtests that gave about 93% coverage for an 80% band; the one-step approach gives about 75–84%.
+
+**Backtest (honest, end to end):** the identical pipeline runs at past cutoffs (3 windows, 30 days apart, each needing 180 days of prior history), using only data before each cutoff, recurring detection included. Each run is scored against what happened:
+
+| Metric | Meaning |
+|---|---|
+| `backtest_balance_error` | Mean absolute gap between forecast and actual balance over the horizon, in currency |
+| `backtest_mase` | Daily net-flow error divided by a same-weekday-last-week guess; below 1 beats it |
+| `backtest_coverage` | Share of days the actual balance stayed inside the band |
+
+**Model choice:** each entity uses the candidate with the lowest balance error, not the lowest MASE. Daily-flow error rewards copying last week (SeasonalNaive), and those errors compound in the balance: on the demo data, SeasonalNaive sometimes won on MASE but had a 39% median balance error at 90 days, against about 6% for AutoETS and HistoricAverage. Defaults are AutoETS(weekly) and HistoricAverage. Too little history to backtest means HistoricAverage and null metrics.
+
+**Measured accuracy** (20 demo businesses, forecasting from 90 days before the end of the data and comparing with what happened):
+
+| Horizon | Mean abs error vs a flat-balance guess | Actual inside 80% band |
+|---|---|---|
+| 30 days | 0.96× (no real gain: lumpy client revenue dominates) | 80% |
+| 60 days | 0.96× | 90% |
+| 90 days | **0.59×** | 95% |
+
+The forecast earns its keep further out, where known bills, income, and trend add up and a flat guess can't see them. At 60 and 90 days the bands are conservative. The test suite pins these results: the forecast must be no worse than the flat guess at 60 days, and at most 0.75× at 90 days, with at least 70% coverage at every horizon.
 
 ### Recurring detection
 
@@ -159,7 +185,7 @@ Rules are idempotent, so re-running a scan never duplicates open anomalies.
 ## API
 
 - `POST /webhooks/relay`: ingest
-- `GET /entities/{id}/forecast?horizon=30|60|90`
+- `GET /entities/{id}/forecast?horizon=30|60|90`: latest stored forecast with daily points and backtest metrics (MASE, band coverage, typical balance error). 404 for unknown entities or before the first refresh, and 422 for an unconfigured horizon. Like every report endpoint, it is unauthenticated for now; API keys are on the "what I'd do next" list.
 - `GET /entities/{id}/anomalies?status=open`
 - `PATCH /entities/{id}/anomalies/{anomaly_id}`: dismiss
 - `GET /entities/{id}/summary`: weekly summary (balance outlook, top categories, open anomalies)

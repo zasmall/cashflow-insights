@@ -11,7 +11,7 @@ from typing import Annotated
 from pydantic import BaseModel, Field, PositiveInt, PostgresDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from cashflow.core.enums import Cadence
+from cashflow.core.enums import Cadence, ForecastModel
 
 Fraction = Annotated[Decimal, Field(gt=0, lt=1)]
 
@@ -55,11 +55,26 @@ class RecurringSettings(BaseModel):
 
 
 class ForecastSettings(BaseModel):
-    """Forecast horizons and backtesting."""
+    """Horizons, candidate models, and backtesting. See "Forecasting" in ARCHITECTURE.md."""
 
     horizons_days: tuple[PositiveInt, ...] = (30, 60, 90)
     confidence_level: Annotated[int, Field(gt=0, lt=100)] = 80
+    # SeasonalNaive is available but not a default: copying last week's flows compounds into
+    # large balance errors (39% median at 90 days on the demo data vs 6% for these two).
+    candidate_models: tuple[ForecastModel, ...] = (
+        ForecastModel.AUTO_ETS,
+        ForecastModel.HISTORIC_AVERAGE,
+    )
+    fallback_model: ForecastModel = ForecastModel.HISTORIC_AVERAGE
+    """Used when history is too short to backtest and choose."""
     backtest_windows: PositiveInt = 3
+    backtest_step_days: PositiveInt = 30
+    min_training_days: PositiveInt = 180
+    """Each backtest window must have at least this much history before its cutoff."""
+
+    @property
+    def max_horizon(self) -> int:
+        return max(self.horizons_days)
 
 
 class AnomalySettings(BaseModel):

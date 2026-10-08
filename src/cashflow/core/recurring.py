@@ -53,6 +53,19 @@ class DetectedSeries:
     occurrences: int
     last_seen_on: date
     next_expected_on: date
+    anchor_day: int | None
+    """Day of month for calendar cadences; None for weekly and biweekly."""
+
+    def occurrences_between(self, start: date, end: date) -> list[date]:
+        """Scheduled dates in [start, end]. Overdue charges before `start` are skipped."""
+        anchor = self.anchor_day or self.next_expected_on.day
+        dates: list[date] = []
+        day = self.next_expected_on
+        while day <= end:
+            if day >= start:
+                dates.append(day)
+            day = next_occurrence(self.cadence, day, anchor)
+        return dates
 
 
 def next_occurrence(cadence: Cadence, after: date, anchor_day: int) -> date:
@@ -145,6 +158,7 @@ def _classify(
         occurrences=len(dates),
         last_seen_on=dates[-1],
         next_expected_on=next_expected,
+        anchor_day=None if cadence in _STEP_DAYS else anchor_day,
     )
 
 
