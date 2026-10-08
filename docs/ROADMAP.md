@@ -13,9 +13,9 @@
 - [x] Seeder command
 
 ## M2 — Webhook ingest
-- [ ] Signature verification (pure function, Hypothesis-tested)
-- [ ] `POST /webhooks/relay` with dedupe on relay event id
-- [ ] Transaction upsert; tests for bad signature, stale timestamp, duplicate delivery, invalid payload
+- [x] Signature verification (pure function, Hypothesis-tested)
+- [x] `POST /webhooks/relay` with dedupe on relay event id
+- [x] Transaction upsert; tests for bad signature, stale timestamp, duplicate delivery, invalid payload
 
 ## M3 — Recurring detection
 - [ ] Cadence and amount-stability detection per vendor
@@ -42,6 +42,7 @@
 ## M8 — Integration
 - [ ] Register as an endpoint on the Webhook Relay; categorizer emits `transaction.categorized`
 - [ ] End-to-end demo across the three repos (docker compose or script)
+- [ ] Entity provisioning CLI, plus reprocessing of stored `unknown_entity` events
 
 ## M9 — Portfolio polish
 - [ ] README: problem, system diagram, forecasting approach and backtest accuracy, key decisions, how to run, "what I'd do next"
