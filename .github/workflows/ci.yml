@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Ruff
+        run: |
+          uv run ruff check --output-format=github .
+          uv run ruff format --check .
+      - name: mypy
+        run: uv run mypy
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: cashflow
+          POSTGRES_PASSWORD: cashflow
+          POSTGRES_DB: cashflow
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cashflow -d cashflow"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://cashflow:cashflow@localhost:5432/cashflow
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Migrations apply and match models
+        run: |
+          uv run alembic upgrade head
+          uv run alembic check
+      - name: pytest
+        run: uv run pytest
