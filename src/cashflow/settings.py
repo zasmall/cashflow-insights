@@ -77,15 +77,35 @@ class ForecastSettings(BaseModel):
         return max(self.horizons_days)
 
 
+PositiveMoney = Annotated[Decimal, Field(gt=0)]
+
+
 class AnomalySettings(BaseModel):
-    """Thresholds for the anomaly rules in ARCHITECTURE.md."""
+    """Thresholds for the anomaly rules. See "Anomaly rules" in ARCHITECTURE.md."""
+
+    lookback_days: PositiveInt = 90
+    """Only findings whose evidence is this recent are reported."""
+    warmup_days: PositiveInt = 90
+    """Nothing in an entity's first days of history counts as new."""
 
     duplicate_window_days: PositiveInt = 3
+    duplicate_min_amount: PositiveMoney = Decimal("20.00")
+
     category_spike_z: Annotated[float, Field(gt=0)] = 3.5
     category_baseline_periods: PositiveInt = 6
-    new_vendor_large_amount: Annotated[Decimal, Field(gt=0)] = Decimal("1000.00")
+    category_min_active_periods: PositiveInt = 4
+    """Baseline months that must have spend, so occasional categories don't "spike"."""
+    category_mad_floor: Fraction = Decimal("0.10")
+    """The MAD is at least this share of the median, so steady categories aren't hair-trigger."""
+    category_min_excess: PositiveMoney = Decimal("500.00")
+    """Materiality: a month this little above typical isn't worth an alert, however unusual."""
+
+    new_vendor_large_amount: PositiveMoney = Decimal("1000.00")
     missed_recurring_grace_days: PositiveInt = 5
     recurring_amount_tolerance: Fraction = Decimal("0.15")
+
+    severity_medium_at: PositiveMoney = Decimal("250.00")
+    severity_high_at: PositiveMoney = Decimal("2500.00")
 
 
 class Settings(BaseSettings):

@@ -61,7 +61,7 @@ Negative amounts are outflows. Amounts are decimal strings and never floats.
 | `recurring_series` | id, entity_id, vendor, typical_amount, cadence, anchor_day, next_expected_on, last_seen_on | Detected recurring bills/income; recomputed per entity, so no natural key. `anchor_day` is null for weekly cadences |
 | `forecasts` | id, entity_id, generated_at, horizon_days, as_of, starting_balance, model, backtest_mase, backtest_coverage, backtest_balance_error | One row per horizon from one fitted model; only the latest run is kept |
 | `forecast_points` | (forecast_id, on_date), expected_balance, lower, upper | Daily points; CHECK `lower <= expected <= upper` |
-| `anomalies` | id, entity_id, type, severity, explanation, transaction_ids (array), fingerprint, detected_at, status, dismissed_at | Unique `(entity_id, fingerprint)` |
+| `anomalies` | id, entity_id, type, severity, explanation, transaction_ids (array), fingerprint, detected_at, status, dismissed_at | Unique `(entity_id, fingerprint)`. Status: open, dismissed (by a person), resolved (by a rescan) |
 
 Conventions:
 
@@ -135,9 +135,9 @@ Problems that a retry can't fix answer 200 and are recorded with a reason, so on
 
 | Horizon | Mean abs error vs a flat-balance guess | Actual inside 80% band |
 |---|---|---|
-| 30 days | 0.96× (no real gain: lumpy client revenue dominates) | 80% |
-| 60 days | 0.96× | 90% |
-| 90 days | **0.59×** | 95% |
+| 30 days | 0.99× (no real gain: lumpy client revenue dominates) | 80% |
+| 60 days | 0.98× | 90% |
+| 90 days | **0.58×** | 95% |
 
 The forecast earns its keep further out, where known bills, income, and trend add up and a flat guess can't see them. At 60 and 90 days the bands are conservative. The test suite pins these results: the forecast must be no worse than the flat guess at 60 days, and at most 0.75× at 90 days, with at least 70% coverage at every horizon.
 
@@ -170,24 +170,42 @@ Details that matter:
 
 ## Anomaly rules
 
-Each rule is a pure function from transactions and context to a list of anomalies.
+`core.anomalies.scan` runs five pure rules over an entity's transactions and its detected recurring series. `refresh_entity` runs it after recurring detection and the forecast. Every finding carries a type, a severity, a human-readable explanation, and the evidence transactions.
 
-| Type | Rule |
-|---|---|
-| `duplicate_charge` | Same vendor and amount within N days |
-| `category_spike` | Category spend this period exceeds a robust z-score (median/MAD) vs. a trailing baseline |
-| `new_vendor_large` | First-ever charge from a vendor above a threshold |
-| `missed_recurring` | A recurring series is past `next_expected_on` plus a grace period |
-| `recurring_amount_change` | A recurring charge deviates beyond tolerance from `typical_amount` |
+| Type | Rule | Evidence | Fingerprint key |
+|---|---|---|---|
+| `duplicate_charge` | Same vendor and amount, outflow ≥ $20, within 3 days. A third copy extends the cluster | the charges | vendor + first charge |
+| `category_spike` | A category's **non-recurring** outflow for the last complete month, or the month so far, is ≥ 3.5 robust z-scores above the median of the previous 6 months | that month's charges | category + month |
+| `new_vendor_large` | A vendor's first-ever outflow is ≥ $1,000, after the warm-up | the charge | vendor |
+| `missed_recurring` | A recurring bill or income is past `next_expected_on` plus 5 days' grace | the last charge that did arrive | vendor + direction + due date |
+| `recurring_amount_change` | A series' latest charges differ from `typical_amount` by more than 15% | the unbroken run of changed charges | vendor + direction + first changed charge |
 
-Rules are idempotent, so re-running a scan never duplicates open anomalies.
+**Shared rules:**
+
+- **Lookback:** only findings with evidence in the last 90 days are reported. A first scan of two years of history surfaces what matters now, not every old oddity.
+- **Warm-up:** nothing in an entity's first 90 days of history counts as a new vendor, because at the start every vendor is new.
+- **Severity** comes from dollar impact, the same way for every rule: low < $250 ≤ medium < $2,500 ≤ high. Impact is the excess charges for a duplicate, spend above typical for a spike, the charge for a new vendor, the missed amounts for a missed bill, and the yearly difference for an amount change.
+- **Outflows only,** except missed bills, where missing income matters too ("Initech's monthly payment ... hasn't arrived").
+
+**Category-spike guards** (each added after measuring false positives on generated data):
+
+- Recurring charges are excluded, since an annual bill landing is expected. Price changes have their own rule.
+- The category must have spend in at least 4 of the 6 baseline months, so occasional categories (travel) don't spike with every trip.
+- The MAD is at least 10% of the median, so steady categories aren't hair-trigger.
+- **Materiality:** the month must be at least $500 above typical. An extra $300 of fuel can be statistically unusual and still not worth an alert.
+
+**Idempotency:** `sync_anomalies` upserts on `(entity_id, fingerprint)`. Open anomalies get refreshed severity, explanation, and evidence, so a spike growing through the month updates in place. Dismissed and resolved anomalies are never touched, so a rescan can't reopen them.
+
+**Resolution:** an open `missed_recurring` anomaly that a rescan no longer reports is marked `resolved` if the bill has since arrived (a later charge from that vendor in that direction). Only missed bills auto-resolve. For other rules, "no longer found" usually just means the evidence aged out of the lookback.
+
+**Verification:** example tests per rule, covering boundaries, guards, and fingerprint stability. A Hypothesis property checks that a scan of generated data finds exactly the five planted anomalies, with their evidence, and nothing else; a one-off sweep of 4,000 random datasets found no exceptions.
 
 ## API
 
 - `POST /webhooks/relay`: ingest
 - `GET /entities/{id}/forecast?horizon=30|60|90`: latest stored forecast with daily points and backtest metrics (MASE, band coverage, typical balance error). 404 for unknown entities or before the first refresh, and 422 for an unconfigured horizon. Like every report endpoint, it is unauthenticated for now; API keys are on the "what I'd do next" list.
-- `GET /entities/{id}/anomalies?status=open`
-- `PATCH /entities/{id}/anomalies/{anomaly_id}`: dismiss
+- `GET /entities/{id}/anomalies?status=open|dismissed|resolved`: most severe first, then most recent. 404 for unknown entities.
+- `PATCH /entities/{id}/anomalies/{anomaly_id}` with `{"status": "dismissed"}` or `{"status": "open"}` to undo. Entity-scoped: another entity's anomaly id returns 404. `resolved` is set only by rescans; changing a resolved anomaly returns 409.
 - `GET /entities/{id}/summary`: weekly summary (balance outlook, top categories, open anomalies)
 
 ## MCP server
@@ -212,7 +230,13 @@ FastMCP with stdio transport, for Claude Desktop and Claude Code. All tools are 
 - variable spend with weekday/weekend and start-of-month seasonality
 - one planted instance of each anomaly type: a duplicate charge, a price increase, a missed bill, a category spike, and a large first charge from a new vendor
 
-It also returns **ground truth**: the recurring series it planted and the source ids behind each planted anomaly. Accidental anomalies are prevented by construction; for example, random charges never repeat a vendor and amount within 14 days. Property tests check this across random seeds, so detection tests can assert exact recovery.
+It also returns **ground truth**: the recurring series it planted and the source ids behind each planted anomaly. Accidental anomalies are prevented by construction, so detection tests can assert exact recovery:
+
+- Random charges never repeat a vendor and amount within 14 days (no accidental duplicates).
+- Each discretionary category's month stays within 1.75× its trailing six-month median (no accidental spikes). Office supplies get a small guaranteed monthly restock, so the category always has a baseline for the planted spike.
+- The planted spike rotates vendors, so it can't pass as a weekly recurring series.
+
+Property tests check this across random seeds.
 
 `python -m cashflow.demo.seed` loads consecutive seeds as separate entities (two by default) and is idempotent. Tests and the demo both use the generator, so no real financial data ever enters the repo.
 

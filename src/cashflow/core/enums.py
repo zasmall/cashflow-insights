@@ -28,6 +28,9 @@ class Severity(StrEnum):
 class AnomalyStatus(StrEnum):
     OPEN = "open"
     DISMISSED = "dismissed"
+    """By a person. Rescans never reopen it."""
+    RESOLVED = "resolved"
+    """By a rescan: a missed bill has since arrived."""
 
 
 class InboundEventStatus(StrEnum):
