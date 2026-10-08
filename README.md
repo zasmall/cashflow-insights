@@ -16,9 +16,10 @@ uv run alembic upgrade head
 uv run python -m cashflow.demo.seed   # two synthetic businesses, 24 months each, with forecasts
 uv run fastapi dev src/cashflow/api/main.py
 curl "localhost:8000/entities/demo-42/forecast?horizon=90"
+curl "localhost:8000/entities/demo-42/anomalies"
 ```
 
-New transactions trigger a background refresh of the entity's recurring series and forecast. Background tasks are in-process, so a restart can drop one. The entity stays flagged, though, and this command, run from cron, catches up:
+New transactions trigger a background refresh of the entity's recurring series, forecast, and anomaly scan. Background tasks are in-process, so a restart can drop one. The entity stays flagged, though, and this command, run from cron, catches up:
 
 ```bash
 uv run python -m cashflow.refresh --dirty    # or --entity ID, or --all
