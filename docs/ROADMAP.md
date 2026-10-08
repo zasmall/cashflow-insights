@@ -35,9 +35,9 @@
 - [x] `GET /entities/{id}/summary` weekly report
 
 ## M7 — MCP server
-- [ ] FastMCP server with the six read-only tools
-- [ ] Tool tests calling tools directly; entity-scoping tests
-- [ ] README section on connecting it to Claude Desktop / Claude Code
+- [x] MCPServer (the SDK's v2 name for FastMCP) with the six read-only tools, plus `get_weekly_summary`
+- [x] Tool tests over the MCP protocol (in-process and stdio); entity-scoping tests
+- [x] README section on connecting it to Claude Desktop / Claude Code
 
 ## M8 — Integration
 - [ ] Register as an endpoint on the Webhook Relay; categorizer emits `transaction.categorized`
