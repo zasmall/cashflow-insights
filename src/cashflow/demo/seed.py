@@ -2,19 +2,21 @@
 
     uv run python -m cashflow.demo.seed [--entities 2] [--seed 42] [--as-of 2026-10-08]
 
-Idempotent: generated ids are deterministic, so re-running with the same arguments writes nothing.
+Idempotent: generated ids are deterministic, so re-running with the same arguments writes no
+transactions. Recurring series are re-detected each run.
 """
 
 import argparse
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime
 
 from sqlalchemy.orm import Session
 
+from cashflow.core.refresh import refresh_recurring
 from cashflow.db.repositories import upsert_entity, upsert_transactions
 from cashflow.db.session import make_engine, make_session_factory, session_scope
 from cashflow.demo.generator import DEFAULT_MONTHS, generate
-from cashflow.settings import get_settings
+from cashflow.settings import RecurringSettings, get_settings
 
 
 @dataclass(frozen=True)
@@ -23,10 +25,17 @@ class SeededEntity:
     name: str
     transactions: int
     written: int
+    recurring_series: int
 
 
 def seed(
-    session: Session, *, entities: int, base_seed: int, as_of: date, months: int = DEFAULT_MONTHS
+    session: Session,
+    *,
+    entities: int,
+    base_seed: int,
+    as_of: date,
+    recurring: RecurringSettings,
+    months: int = DEFAULT_MONTHS,
 ) -> list[SeededEntity]:
     """Seed `entities` businesses using consecutive seeds. The caller commits."""
     results: list[SeededEntity] = []
@@ -36,10 +45,19 @@ def seed(
         written = upsert_transactions(
             session,
             dataset.transactions,
-            source_updated_at=datetime.combine(as_of, time(), UTC),
+            # The seeder is the source here, emitting this version now. Using now (not as_of)
+            # lets a changed generator overwrite older rows; identical rows still write nothing.
+            source_updated_at=datetime.now(UTC),
         )
+        series = refresh_recurring(session, dataset.entity.id, as_of=as_of, settings=recurring)
         results.append(
-            SeededEntity(dataset.entity.id, dataset.entity.name, len(dataset.transactions), written)
+            SeededEntity(
+                dataset.entity.id,
+                dataset.entity.name,
+                len(dataset.transactions),
+                written,
+                len(series),
+            )
         )
     return results
 
@@ -57,7 +75,8 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    engine = make_engine(get_settings())
+    settings = get_settings()
+    engine = make_engine(settings)
     try:
         with session_scope(make_session_factory(engine)) as session:
             results = seed(
@@ -65,13 +84,17 @@ def main(argv: list[str] | None = None) -> None:
                 entities=args.entities,
                 base_seed=args.seed,
                 as_of=args.as_of,
+                recurring=settings.recurring,
                 months=args.months,
             )
     finally:
         engine.dispose()
 
     for r in results:
-        print(f"{r.entity_id}  {r.name:<28} {r.transactions:>5} transactions, {r.written} written")
+        print(
+            f"{r.entity_id}  {r.name:<28} {r.transactions:>5} transactions ({r.written} written), "
+            f"{r.recurring_series} recurring series"
+        )
 
 
 if __name__ == "__main__":

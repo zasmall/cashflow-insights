@@ -31,7 +31,7 @@ class Entity(BaseModel):
 class Transaction(BaseModel):
     """A categorized bank transaction for one entity."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, from_attributes=True)
 
     entity_id: SourceId
     source_id: SourceId

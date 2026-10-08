@@ -4,13 +4,14 @@ from collections.abc import Iterable, Sequence
 from datetime import datetime
 from itertools import batched
 
-from sqlalchemy import func, select, tuple_, update
+from sqlalchemy import delete, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from cashflow.core.enums import InboundEventStatus
 from cashflow.core.events import RelayEnvelope
 from cashflow.core.models import Entity, Transaction
+from cashflow.core.recurring import DetectedSeries
 from cashflow.db import models as orm
 
 # Postgres caps a statement at 65,535 bind parameters; 10 columns x 1,000 rows stays well under.
@@ -109,3 +110,34 @@ def finish_inbound_event(
         .where(orm.InboundEvent.id == event_id)
         .values(status=status, entity_id=entity_id, error=error, processed_at=func.now())
     )
+
+
+def entity_transactions(session: Session, entity_id: str) -> list[Transaction]:
+    rows = session.scalars(
+        select(orm.Transaction)
+        .where(orm.Transaction.entity_id == entity_id)
+        .order_by(orm.Transaction.posted_on, orm.Transaction.id)
+    )
+    return [Transaction.model_validate(row) for row in rows]
+
+
+def replace_recurring_series(
+    session: Session, entity_id: str, series: Sequence[DetectedSeries]
+) -> None:
+    """Swap an entity's series for a fresh detection run. Ids are not stable across runs."""
+    session.execute(delete(orm.RecurringSeries).where(orm.RecurringSeries.entity_id == entity_id))
+    if series:
+        session.execute(
+            insert(orm.RecurringSeries),
+            [
+                {
+                    "entity_id": entity_id,
+                    "vendor": s.vendor,
+                    "typical_amount": s.typical_amount,
+                    "cadence": s.cadence,
+                    "next_expected_on": s.next_expected_on,
+                    "last_seen_on": s.last_seen_on,
+                }
+                for s in series
+            ],
+        )
