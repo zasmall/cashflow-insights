@@ -35,3 +35,33 @@ uv run pytest
 ```
 
 Tests marked `db` run against a separate `cashflow_test` database, recreated and migrated on each run, so they never touch dev data. They skip locally when Postgres isn't running and fail in CI.
+
+## Ask Claude about the data (MCP)
+
+The MCP server gives Claude read-only tools over the same data as the API. It needs Postgres running and a `.env` with `DATABASE_URL`.
+
+**Claude Code** (run from anywhere; `--directory` points uv at this project):
+
+```bash
+claude mcp add cashflow-insights -- uv run --directory /absolute/path/to/cashflow-insights python -m cashflow.mcp_server
+```
+
+**Claude Desktop:** add this to `claude_desktop_config.json` (Settings → Developer → Edit Config), then restart. If Desktop can't find `uv`, use its absolute path (`which uv`).
+
+```json
+{
+  "mcpServers": {
+    "cashflow-insights": {
+      "command": "uv",
+      "args": ["run", "--directory", "/absolute/path/to/cashflow-insights", "python", "-m", "cashflow.mcp_server"]
+    }
+  }
+}
+```
+
+Then ask things like:
+
+- "Which businesses can you see, and how did each do last week?"
+- "Will demo-42 run low on cash in the next 90 days? How confident is that?"
+- "Explain the anomalies for demo-43 and show the transactions behind each."
+- "Where did demo-42's money go in September?"

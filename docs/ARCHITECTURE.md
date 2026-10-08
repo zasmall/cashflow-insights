@@ -222,16 +222,27 @@ Details that matter:
 
 ## MCP server
 
-FastMCP with stdio transport, for Claude Desktop and Claude Code. All tools are read-only, entity-scoped, and return Pydantic models.
+`cashflow.mcp_server` uses the official SDK's `MCPServer` (v2.x; `FastMCP` in 1.x) over stdio, for Claude Code and Claude Desktop. Tools are thin wrappers over `core.queries`, the same read services the API uses, and return its Pydantic models as structured output. Domain errors (unknown entity, bad horizon) come back as tool errors.
 
 | Tool | Purpose |
 |---|---|
-| `list_entities` | Discover what's available |
+| `list_entities` | Discover what's available: currency, latest transaction, open anomaly count, pending refresh |
+| `get_weekly_summary(entity_id, week_of?)` | The weekly summary; the best first call for "how is this business doing?" |
 | `get_forecast(entity_id, horizon_days)` | Balance outlook with bands and backtest accuracy |
-| `list_anomalies(entity_id, status)` | Current flags |
-| `explain_anomaly(entity_id, anomaly_id)` | Explanation plus evidence transactions |
-| `spend_by_category(entity_id, start, end)` | Category totals |
-| `list_recurring(entity_id)` | Detected subscriptions and bills |
+| `list_anomalies(entity_id, status)` | Current flags, most severe first |
+| `explain_anomaly(entity_id, anomaly_id)` | The anomaly plus its evidence transactions |
+| `spend_by_category(entity_id, start, end)` | Money out and in per category over a date range |
+| `list_recurring(entity_id)` | Detected subscriptions, bills, and regular income |
+
+**Read-only, three ways:**
+
+1. Every tool is annotated `read_only_hint` and not destructive.
+2. A test pins the exact tool set and those annotations, so adding a tool, especially one that writes, takes a deliberate change.
+3. The server's database sessions run in Postgres `READ ONLY` transactions, so even a buggy tool fails at the database rather than writing.
+
+**Entity scoping:** every tool but `list_entities` takes an `entity_id` and fails for unknown entities. `explain_anomaly` looks anomalies up within the entity, so another entity's anomaly id is "not found". Tests probe each tool.
+
+Tool and argument descriptions state the conventions an LLM needs: negative amounts are money out, money is a decimal string, and dates are ISO.
 
 ## Demo data
 
