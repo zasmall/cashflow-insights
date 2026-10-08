@@ -3,6 +3,7 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
+from cashflow.core.enums import Cadence
 from cashflow.settings import Settings
 
 
@@ -48,3 +49,13 @@ def test_invalid_values_are_rejected(monkeypatch: pytest.MonkeyPatch, var: str, 
 
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+def test_min_occurrences_override_keeps_other_cadences(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RECURRING__MIN_OCCURRENCES", '{"annual": 3}')
+
+    occurrences = Settings(_env_file=None).recurring.min_occurrences
+
+    assert occurrences[Cadence.ANNUAL] == 3
+    assert occurrences[Cadence.MONTHLY] == 3
+    assert occurrences[Cadence.WEEKLY] == 4

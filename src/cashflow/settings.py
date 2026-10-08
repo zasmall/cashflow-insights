@@ -8,8 +8,10 @@ from decimal import Decimal
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import BaseModel, Field, PositiveInt, PostgresDsn, SecretStr
+from pydantic import BaseModel, Field, PositiveInt, PostgresDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from cashflow.core.enums import Cadence
 
 Fraction = Annotated[Decimal, Field(gt=0, lt=1)]
 
@@ -22,12 +24,34 @@ class WebhookSettings(BaseModel):
     max_body_bytes: PositiveInt = 256 * 1024
 
 
-class RecurringSettings(BaseModel):
-    """Recurring-series detection."""
+DEFAULT_MIN_OCCURRENCES: dict[Cadence, int] = {
+    Cadence.WEEKLY: 4,
+    Cadence.BIWEEKLY: 3,
+    Cadence.MONTHLY: 3,
+    Cadence.QUARTERLY: 3,
+    # Three annual charges would need three years of history; two is enough evidence.
+    Cadence.ANNUAL: 2,
+}
 
-    min_occurrences: Annotated[int, Field(ge=2)] = 3
+
+class RecurringSettings(BaseModel):
+    """Recurring-series detection. See "Recurring detection" in docs/ARCHITECTURE.md."""
+
+    min_occurrences: dict[Cadence, Annotated[int, Field(ge=2)]] = Field(
+        default_factory=lambda: dict(DEFAULT_MIN_OCCURRENCES)
+    )
     amount_tolerance: Fraction = Decimal("0.10")
     cadence_tolerance_days: PositiveInt = 3
+    min_consistent_share: Annotated[float, Field(gt=0, le=1)] = 0.75
+    """Share of amounts, and of gaps between charges, that must fit the series."""
+    max_missed_cycles: PositiveInt = 3
+    """A series that has missed more expected charges than this is treated as cancelled."""
+
+    @field_validator("min_occurrences")
+    @classmethod
+    def _fill_unset_cadences(cls, value: dict[Cadence, int]) -> dict[Cadence, int]:
+        # Overriding one cadence (e.g. via env JSON) keeps the defaults for the others.
+        return {**DEFAULT_MIN_OCCURRENCES, **value}
 
 
 class ForecastSettings(BaseModel):

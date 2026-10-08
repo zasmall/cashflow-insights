@@ -109,11 +109,38 @@ Problems that a retry can't fix answer 200 and are recorded with a reason, so on
 
 ## Forecasting
 
-1. **Recurring detection:** group by vendor, then find series with a stable cadence (weekly, biweekly, monthly, quarterly, annual) and stable amounts within a tolerance. This step is deterministic and property-tested.
+1. **Recurring detection:** see below.
 2. **Known flows:** project recurring series forward on their cadence.
 3. **Residual flows:** aggregate the remaining non-recurring net flow per day and forecast it with statsforecast (for example AutoETS). Prediction intervals give the bands.
 4. **Balance:** take the opening/current balance plus cumulative (recurring + residual), with the residual bands carried through.
 5. **Backtest:** use a rolling-origin evaluation and store the MASE on each forecast run. Report it in the API and README, since an honest accuracy number is a senior signal.
+
+### Recurring detection
+
+`core.recurring.detect_recurring` is a pure function. Polars computes per-group statistics and a small Python step classifies each group. There is one candidate per (vendor, direction), so refunds don't mix with charges. A candidate is recurring when all four hold (settings in `RecurringSettings`):
+
+| Rule | Default |
+|---|---|
+| **Stable amount:** this share of charges is within the tolerance of the median, which becomes `typical_amount` | 75% within 10% |
+| **Regular timing:** the median gap picks the nearest cadence, then this share of gaps match its calendar step | 75% within ±3 days |
+| **Enough evidence:** minimum charges per cadence | weekly 4, biweekly 3, monthly 3, quarterly 3, annual 2 |
+| **Not ended:** expected charges missed since the last one | at most 3 |
+
+Details that matter:
+
+- **Annual needs only two charges**, or annual bills would take three years to appear. Because two charges is thin evidence, their amounts must be identical. Real subscriptions repeat exactly; two similar flights a year apart don't.
+- **Price changes don't break a series.** The median keeps the old amount until the new one is the majority, so M5 can flag the change. With very short histories (under about 12 months), two raised charges can be more than 25% of the series, and it drops out until history builds.
+- **Calendar cadences have an anchor day,** the day of month that explains the most charges. A month-end charge fits any later anchor, so a bill on the 31st, or an annual bill on Feb 29, is predicted back on its true day after short months.
+- **Ended series are dropped** after `max_missed_cycles`, so a cancelled subscription doesn't raise missed-bill alerts forever. A recently missed bill stays, so M5 can flag it.
+- `refresh_recurring` replaces an entity's stored series in one transaction. Series ids aren't stable across runs, so anomaly fingerprints use vendor and dates instead.
+
+**Known limitations** (candidates for "what I'd do next"):
+
+- Two subscriptions from one vendor (say $89.99 and $22.99 monthly) split the amounts, so neither is detected. That is a miss, not a false alarm. Clustering by amount would fix it but would also split a price change into two series, so it needs a merge step for consecutive clusters.
+- Usage-priced bills (cloud hosting, utilities) are monthly but too variable to pass the amount rule. They fall into the residual forecast instead.
+- A bill anchored on the 1st that sometimes posts on the last day of the previous month can make the anchor day wrong by a few days. The anomaly grace period absorbs this.
+
+**Verification:** example tests; Hypothesis properties showing that jittered, noisy series of every cadence are recovered and that unstable amounts or irregular timing never are; and an exact match against the demo generator's ground truth across random seeds, dates, and history lengths.
 
 ## Anomaly rules
 
@@ -155,7 +182,7 @@ FastMCP with stdio transport, for Claude Desktop and Claude Code. All tools are 
 `cashflow.demo.generator.generate(seed, as_of, months=24)` is a pure function: the same arguments always give the same dataset. It produces one business with:
 - client revenue plus a monthly retainer, biweekly payroll, and rent
 - monthly, quarterly, and annual subscriptions and bills
-- usage-priced cloud hosting (monthly but deliberately too variable to count as recurring)
+- usage-priced cloud hosting, monthly but alternating quiet and busy months, so it can never pass the recurring amount rule
 - variable spend with weekday/weekend and start-of-month seasonality
 - one planted instance of each anomaly type: a duplicate charge, a price increase, a missed bill, a category spike, and a large first charge from a new vendor
 

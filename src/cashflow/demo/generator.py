@@ -240,10 +240,12 @@ class _Generator:
             month = add_months(month, 1)
 
     def _add_cloud_hosting(self) -> None:
-        # Monthly but usage-priced, so its amount is too unstable to count as a recurring series.
+        # Monthly but usage-priced: quiet and busy months alternate, so at most about half the
+        # charges sit near the median, and it can never pass the recurring amount rule.
         spec = _RecurringSpec("AWS", "Cloud Hosting", Cadence.MONTHLY, Decimal(0), day=2)
-        for posted_on in self._occurrences(spec):
-            amount = -_money(self.rng.uniform(140, 330))
+        for n, posted_on in enumerate(self._occurrences(spec)):
+            low, high = (130, 180) if n % 2 == 0 else (270, 340)
+            amount = -_money(self.rng.uniform(low, high))
             self._add(posted_on, amount, "AWS", "Cloud Hosting")
 
     def _add_variable_spend(self) -> None:
