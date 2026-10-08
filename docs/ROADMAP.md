@@ -8,9 +8,9 @@
 - [x] GitHub Actions: Ruff, mypy, pytest (with a Postgres service)
 
 ## M1 — Data model & demo data
-- [ ] Models + migrations for all tables in ARCHITECTURE.md
-- [ ] Deterministic synthetic generator with injected anomalies
-- [ ] Seeder command
+- [x] Models + migrations for all tables in ARCHITECTURE.md
+- [x] Deterministic synthetic generator with injected anomalies
+- [x] Seeder command
 
 ## M2 — Webhook ingest
 - [ ] Signature verification (pure function, Hypothesis-tested)
