@@ -62,6 +62,7 @@ ignore = [
 "tests/**" = ["S101", "PLR2004", "ANN"]
 "migrations/**" = ["ANN"]
 "migrations/versions/**" = ["ANN", "E501"]  # generated SQL literals run long
+"src/cashflow/demo/**" = ["S311"]  # seeded, non-cryptographic randomness is the point
 
 [tool.ruff.lint.flake8-type-checking]
 runtime-evaluated-base-classes = [

@@ -108,13 +108,16 @@ FastMCP with stdio transport, for Claude Desktop and Claude Code. All tools are 
 
 ## Demo data
 
-The synthetic generator is seeded and deterministic. It produces:
-- payroll and rent
-- several subscriptions
-- variable spend with weekly and monthly seasonality
-- injected anomalies: a duplicate charge, a price increase, a missed bill, and a spike
+`cashflow.demo.generator.generate(seed, as_of, months=24)` is a pure function: the same arguments always give the same dataset. It produces one business with:
+- client revenue plus a monthly retainer, biweekly payroll, and rent
+- monthly, quarterly, and annual subscriptions and bills
+- usage-priced cloud hosting (monthly but deliberately too variable to count as recurring)
+- variable spend with weekday/weekend and start-of-month seasonality
+- one planted instance of each anomaly type: a duplicate charge, a price increase, a missed bill, a category spike, and a large first charge from a new vendor
 
-Tests and the demo both use it, so no real financial data ever enters the repo.
+It also returns **ground truth**: the recurring series it planted and the source ids behind each planted anomaly. Accidental anomalies are prevented by construction; for example, random charges never repeat a vendor and amount within 14 days. Property tests check this across random seeds, so detection tests can assert exact recovery.
+
+`python -m cashflow.demo.seed` loads consecutive seeds as separate entities (two by default) and is idempotent. Tests and the demo both use the generator, so no real financial data ever enters the repo.
 
 ## Non-goals
 
