@@ -18,8 +18,8 @@
 - [x] Transaction upsert; tests for bad signature, stale timestamp, duplicate delivery, invalid payload
 
 ## M3 — Recurring detection
-- [ ] Cadence and amount-stability detection per vendor
-- [ ] Property tests: generated series are recovered; noise isn't mistaken for a series
+- [x] Cadence and amount-stability detection per vendor
+- [x] Property tests: generated series are recovered; noise isn't mistaken for a series
 
 ## M4 — Forecasting
 - [ ] Recurring projection + statsforecast residual model
