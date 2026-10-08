@@ -3,13 +3,14 @@
     uv run python -m cashflow.refresh --dirty          # entities flagged by ingest (cron-safe)
     uv run python -m cashflow.refresh --entity demo-42
     uv run python -m cashflow.refresh --all
+    uv run python -m cashflow.refresh --entity 1 --as-of 2026-03-31   # view older data as of a date
 
 Ingest refreshes in a background task after each response. That task is in-process, so this
 command is the safety net: entities stay flagged until a refresh succeeds.
 """
 
 import argparse
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from cashflow.core.refresh import refresh_entity, refresh_if_dirty
 from cashflow.db import repositories
@@ -23,12 +24,18 @@ def main(argv: list[str] | None = None) -> None:
     target.add_argument("--dirty", action="store_true", help="entities with new transactions")
     target.add_argument("--all", action="store_true", help="every entity")
     target.add_argument("--entity", help="one entity id")
+    parser.add_argument(
+        "--as-of",
+        type=date.fromisoformat,
+        default=datetime.now(UTC).date(),
+        help="date to forecast from and scan up to (default: today, UTC); useful for old data",
+    )
     args = parser.parse_args(argv)
 
     settings = get_settings()
     engine = make_engine(settings)
     factory = make_session_factory(engine)
-    as_of = datetime.now(UTC).date()
+    as_of = args.as_of
     try:
         if args.dirty:
             with factory() as session:

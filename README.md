@@ -14,10 +14,10 @@ uv sync
 docker compose up -d
 uv run alembic upgrade head
 uv run python -m cashflow.demo.seed   # two synthetic businesses, 24 months each, with forecasts
-uv run fastapi dev src/cashflow/api/main.py
-curl "localhost:8000/entities/demo-42/forecast?horizon=90"
-curl "localhost:8000/entities/demo-42/anomalies"
-curl "localhost:8000/entities/demo-42/summary"
+uv run fastapi dev src/cashflow/api/main.py --port 8003   # 8000 is the relay's
+curl "localhost:8003/entities/demo-42/forecast?horizon=90"
+curl "localhost:8003/entities/demo-42/anomalies"
+curl "localhost:8003/entities/demo-42/summary"
 ```
 
 New transactions trigger a background refresh of the entity's recurring series, forecast, and anomaly scan. Background tasks are in-process, so a restart can drop one. The entity stays flagged, though, and this command, run from cron, catches up:
@@ -25,6 +25,14 @@ New transactions trigger a background refresh of the entity's recurring series, 
 ```bash
 uv run python -m cashflow.refresh --dirty    # or --entity ID, or --all
 ```
+
+Real businesses come from Transaction Categorizer through Webhook Relay. Provision each one here with its opening balance; events that arrived first are applied then:
+
+```bash
+uv run python -m cashflow.entities add --id 1 --name "Northwind Coffee Co." --opening-balance 25000.00 --as-of 2025-12-31
+```
+
+**End-to-end demo** across all three repos: `scripts/e2e-demo.sh setup`, then `run`. See [docs/DEMO.md](docs/DEMO.md).
 
 Checks (all run in CI):
 

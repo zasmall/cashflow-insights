@@ -6,6 +6,8 @@ Turn a stream of categorized transactions into forward-looking insight a small b
 
 ## System context
 
+The end-to-end path is demonstrated by `scripts/e2e-demo.sh`; see `docs/DEMO.md`.
+
 ```
 Transaction Categorizer ──(transaction.categorized)──▶ Webhook Relay ──▶ Cashflow Insights API
                                                                               │
@@ -29,11 +31,11 @@ Headers: `X-Relay-Signature` (below), plus `X-Relay-Event-Id`, `X-Relay-Event-Ty
 
 **Signature:** `t=<unix>,v1=<hex HMAC-SHA256 of "{t}.{raw_body}">`, with one `v1` per active secret while the relay rotates secrets. We accept the request if any `v1` matches, ignore unknown schemes such as `v2`, and reject timestamps outside the tolerance window (300 s by default). A test vector produced by the relay's own PHP signer pins compatibility.
 
-For `transaction.categorized`, `data` must be agreed with the categorizer:
+For `transaction.categorized`, `data` is published by Transaction Categorizer (`App\Relay\TransactionCategorizedEvent` there) whenever a categorization is **approved**, by a person or a rule. AI suggestions aren't final and aren't published.
 
 ```json
 {
-  "entity_id": "17",
+  "entity_id": "1",
   "transaction": {
     "id": "48213",
     "account_id": "3",
@@ -42,14 +44,26 @@ For `transaction.categorized`, `data` must be agreed with the categorizer:
     "currency": "USD",
     "description": "ADOBE *CREATIVE CLD",
     "vendor": "Adobe",
-    "category": "Software & Subscriptions"
+    "category": "Software & Subscriptions",
+    "categorized_at": "2026-10-01T14:03:20Z"
   }
 }
 ```
 
-Negative amounts are outflows. Amounts are decimal strings and never floats.
+| Field | Categorizer source |
+|---|---|
+| `entity_id` | client id |
+| `transaction.id` | transaction id (the upsert key here, with `entity_id`) |
+| `account_id` | bank account id |
+| `amount` | `amount_cents` as an exact decimal string; negative is money out, never a float |
+| `currency` | `RELAY_CURRENCY` (the categorizer is single-currency) |
+| `description` / `vendor` | `description_raw` / `payee_normalized` |
+| `category` | the chart-of-accounts name |
+| `categorized_at` | the categorization's `created_at`: **the version time** |
 
-**Identifiers are opaque strings** (up to 64 chars). The categorizer currently uses auto-increment integers (`entity_id` is its `client_id`, `account_id` its `bank_account_id`), but nothing here parses or assumes a format, so its ID scheme can change without breaking ingest. The field mapping is finalized in M8.
+**Identifiers are opaque strings** (up to 64 chars). The categorizer uses auto-increment integers today, but nothing here parses or assumes a format, so its ID scheme can change without breaking ingest.
+
+**Versioning:** each categorization publishes once (idempotency key `categorization-{id}`), so recategorizing a transaction sends a new event. Transactions are upserted only when `categorized_at` is at least as new as the stored version. That's the *source's* clock, not the relay envelope's `created_at`, which is when the relay received the event: a categorization whose publish job was delayed by retries reaches the relay late and would otherwise look newer than the decision that replaced it.
 
 ## Data model
 
@@ -103,7 +117,7 @@ Because recording and applying commit together, a crash mid-ingest leaves no ded
 
 Problems that a retry can't fix answer 200 and are recorded with a reason, so one bad event can't trip the relay's breaker and pause every delivery. We never send 410.
 
-**Unknown entities:** entities are provisioned here (for now, by the seeder) rather than created from events. Events for an unknown entity are stored as `unknown_entity` with their payload, ready to be reprocessed once it exists.
+**Unknown entities:** entities are provisioned here (`python -m cashflow.entities add`, with the opening balance a forecast starts from, which the categorizer doesn't know) rather than created from events. Events for an unknown entity are stored as `unknown_entity` with their payload. Provisioning applies them, oldest first, in the same transaction, then refreshes the entity. Their `categorized_at` keeps replay order from mattering.
 
 **Recompute trigger:** when a processed event actually changes a transaction, ingest sets `entities.dirty_since` in the same transaction. After the response, a FastAPI `BackgroundTasks` job claims the entity atomically (`UPDATE ... SET dirty_since = NULL WHERE dirty_since IS NOT NULL RETURNING`) and refreshes it: recurring detection, then the forecast, and from M5 the anomaly scan. The claim and the refresh share one transaction:
 
