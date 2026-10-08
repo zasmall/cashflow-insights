@@ -7,7 +7,7 @@ Idempotent: generated ids are deterministic, so re-running with the same argumen
 
 import argparse
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 
 from sqlalchemy.orm import Session
 
@@ -33,7 +33,11 @@ def seed(
     for n in range(entities):
         dataset = generate(base_seed + n, as_of, months)
         upsert_entity(session, dataset.entity)
-        written = upsert_transactions(session, dataset.transactions)
+        written = upsert_transactions(
+            session,
+            dataset.transactions,
+            source_updated_at=datetime.combine(as_of, time(), UTC),
+        )
         results.append(
             SeededEntity(dataset.entity.id, dataset.entity.name, len(dataset.transactions), written)
         )

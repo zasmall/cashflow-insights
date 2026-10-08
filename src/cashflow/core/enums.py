@@ -28,3 +28,17 @@ class Severity(StrEnum):
 class AnomalyStatus(StrEnum):
     OPEN = "open"
     DISMISSED = "dismissed"
+
+
+class InboundEventStatus(StrEnum):
+    """What became of a relay delivery. Every terminal status is answered with 2xx."""
+
+    RECEIVED = "received"
+    """Recorded but not yet handled. Ingest finishes in the same transaction, so never committed."""
+    PROCESSED = "processed"
+    IGNORED = "ignored"
+    """An event type we don't consume."""
+    INVALID = "invalid"
+    """Signed by the relay but unusable; `error` says why. Retrying can't fix it."""
+    UNKNOWN_ENTITY = "unknown_entity"
+    """For an entity not provisioned here yet. Kept so it can be reprocessed later."""

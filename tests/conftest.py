@@ -5,9 +5,9 @@ from collections.abc import Iterator
 import pytest
 from alembic import command
 from pydantic import PostgresDsn
-from sqlalchemy import URL, Engine, make_url, text
+from sqlalchemy import URL, Connection, Engine, make_url, text
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from cashflow.db.session import make_engine
 from cashflow.settings import Settings
@@ -60,14 +60,23 @@ def engine() -> Iterator[Engine]:
 
 
 @pytest.fixture
-def session(engine: Engine) -> Iterator[Session]:
-    """A session whose work, commits included, is rolled back after the test."""
-    connection = engine.connect()
-    outer = connection.begin()
-    session = Session(bind=connection, join_transaction_mode="create_savepoint")
-    try:
+def connection(engine: Engine) -> Iterator[Connection]:
+    """A connection inside a transaction that is rolled back after the test."""
+    with engine.connect() as connection:
+        outer = connection.begin()
+        try:
+            yield connection
+        finally:
+            outer.rollback()
+
+
+@pytest.fixture
+def session_factory(connection: Connection) -> sessionmaker[Session]:
+    """Sessions on the test connection; their commits become savepoints, so nothing persists."""
+    return sessionmaker(bind=connection, join_transaction_mode="create_savepoint")
+
+
+@pytest.fixture
+def session(session_factory: sessionmaker[Session]) -> Iterator[Session]:
+    with session_factory() as session:
         yield session
-    finally:
-        session.close()
-        outer.rollback()
-        connection.close()

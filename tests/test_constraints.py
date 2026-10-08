@@ -105,8 +105,8 @@ def test_money_round_trips_exactly(session: Session) -> None:
     session.execute(
         text(
             "INSERT INTO transactions (entity_id, source_id, account_id, posted_on, amount,"
-            " description, vendor, category)"
-            " VALUES (:e, 't-1', 'acct', '2026-01-02', :amount, '', 'Adobe', 'Software')"
+            " description, vendor, category, source_updated_at)"
+            " VALUES (:e, 't-1', 'acct', '2026-01-02', :amount, '', 'Adobe', 'Software', now())"
         ),
         {"e": ENTITY_ID, "amount": Decimal("-129.99")},
     )
@@ -121,8 +121,8 @@ def test_deleting_entity_cascades(session: Session) -> None:
     session.execute(
         text(
             "INSERT INTO transactions (entity_id, source_id, account_id, posted_on, amount,"
-            " description, vendor, category)"
-            " VALUES (:e, 't-1', 'acct', '2026-01-02', -1, '', 'Adobe', 'Software')"
+            " description, vendor, category, source_updated_at)"
+            " VALUES (:e, 't-1', 'acct', '2026-01-02', -1, '', 'Adobe', 'Software', now())"
         ),
         {"e": ENTITY_ID},
     )

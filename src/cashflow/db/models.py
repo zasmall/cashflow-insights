@@ -21,7 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from cashflow.core.enums import AnomalyStatus, AnomalyType, Cadence, Severity
+from cashflow.core.enums import AnomalyStatus, AnomalyType, Cadence, InboundEventStatus, Severity
 from cashflow.db.base import Base, BigIntPk, Money, SourceId, TimestampMixin, str_enum
 
 EntityFk = Annotated[str, mapped_column(String(64), ForeignKey("entities.id", ondelete="CASCADE"))]
@@ -42,11 +42,19 @@ class InboundEvent(Base):
     """Dedupe log for relay deliveries, which arrive at least once."""
 
     __tablename__ = "inbound_events"
+    __table_args__ = (Index("ix_inbound_events_entity_status", "entity_id", "status"),)
 
     id: Mapped[BigIntPk]
     relay_event_id: Mapped[str] = mapped_column(String(64), unique=True)
     type: Mapped[str] = mapped_column(String(100))
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    status: Mapped[InboundEventStatus] = mapped_column(
+        str_enum(InboundEventStatus, "inbound_event_status"),
+        server_default=InboundEventStatus.RECEIVED.value,
+    )
+    # No FK: events for entities not provisioned yet are kept for later reprocessing.
+    entity_id: Mapped[str | None] = mapped_column(String(64))
+    error: Mapped[str | None] = mapped_column(Text)
     received_at: Mapped[datetime] = mapped_column(server_default=func.now())
     processed_at: Mapped[datetime | None]
 
@@ -69,6 +77,9 @@ class Transaction(TimestampMixin, Base):
     description: Mapped[str] = mapped_column(String(500))
     vendor: Mapped[str] = mapped_column(String(200))
     category: Mapped[str] = mapped_column(String(200))
+    # When upstream emitted this version. Upserts never replace a newer version with an older
+    # one, so a delayed retry of an old event can't undo a later recategorization.
+    source_updated_at: Mapped[datetime]
 
 
 class RecurringSeries(TimestampMixin, Base):
