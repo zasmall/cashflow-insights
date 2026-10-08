@@ -1,6 +1,7 @@
 """Persistence operations. Callers own the transaction: nothing here commits."""
 
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from itertools import batched
@@ -9,7 +10,8 @@ from sqlalchemy import delete, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, selectinload
 
-from cashflow.core.enums import InboundEventStatus
+from cashflow.core.anomalies import Finding
+from cashflow.core.enums import AnomalyStatus, AnomalyType, InboundEventStatus
 from cashflow.core.events import RelayEnvelope
 from cashflow.core.forecast import ForecastRun, History
 from cashflow.core.models import Entity, Transaction
@@ -231,3 +233,131 @@ def dirty_entity_ids(session: Session) -> list[str]:
 
 def entity_ids(session: Session) -> list[str]:
     return list(session.scalars(select(orm.Entity.id).order_by(orm.Entity.id)))
+
+
+@dataclass(frozen=True)
+class AnomalySyncResult:
+    upserted: int
+    resolved: int
+
+
+def sync_anomalies(
+    session: Session, entity_id: str, findings: Sequence[Finding]
+) -> AnomalySyncResult:
+    """Apply a scan's findings idempotently, keyed by fingerprint.
+
+    - New findings are inserted as open.
+    - Open anomalies found again get their severity, explanation, and evidence refreshed.
+    - Dismissed and resolved anomalies are never touched, so a rescan can't reopen them.
+    - Open missed-bill anomalies that this scan no longer reports are resolved if the bill has
+      since arrived (a later charge from that vendor in that direction).
+    """
+    ids_by_source = _transaction_ids(
+        session, entity_id, {i for f in findings for i in f.source_ids}
+    )
+    for f in findings:
+        stmt = insert(orm.Anomaly).values(
+            entity_id=entity_id,
+            type=f.type,
+            severity=f.severity,
+            explanation=f.explanation,
+            transaction_ids=[ids_by_source[i] for i in f.source_ids],
+            fingerprint=f.fingerprint,
+        )
+        session.execute(
+            stmt.on_conflict_do_update(
+                constraint="uq_anomalies_entity_fingerprint",
+                set_={
+                    "severity": stmt.excluded.severity,
+                    "explanation": stmt.excluded.explanation,
+                    "transaction_ids": stmt.excluded.transaction_ids,
+                },
+                where=orm.Anomaly.status == AnomalyStatus.OPEN,
+            )
+        )
+    resolved = _resolve_arrived_bills(session, entity_id, {f.fingerprint for f in findings})
+    return AnomalySyncResult(upserted=len(findings), resolved=resolved)
+
+
+def _transaction_ids(session: Session, entity_id: str, source_ids: set[str]) -> dict[str, int]:
+    if not source_ids:
+        return {}
+    rows = session.execute(
+        select(orm.Transaction.source_id, orm.Transaction.id).where(
+            orm.Transaction.entity_id == entity_id, orm.Transaction.source_id.in_(source_ids)
+        )
+    )
+    return dict(rows.all())
+
+
+def _resolve_arrived_bills(session: Session, entity_id: str, still_found: set[str]) -> int:
+    stale = session.scalars(
+        select(orm.Anomaly).where(
+            orm.Anomaly.entity_id == entity_id,
+            orm.Anomaly.type == AnomalyType.MISSED_RECURRING,
+            orm.Anomaly.status == AnomalyStatus.OPEN,
+            orm.Anomaly.fingerprint.not_in(still_found),
+        )
+    ).all()
+    resolved = 0
+    for anomaly in stale:
+        last_seen = (
+            session.get(orm.Transaction, anomaly.transaction_ids[0])
+            if anomaly.transaction_ids
+            else None
+        )
+        if last_seen is None:
+            continue
+        same_direction = (
+            orm.Transaction.amount > 0 if last_seen.amount > 0 else orm.Transaction.amount < 0
+        )
+        arrived = session.scalar(
+            select(func.count())
+            .select_from(orm.Transaction)
+            .where(
+                orm.Transaction.entity_id == entity_id,
+                orm.Transaction.vendor == last_seen.vendor,
+                orm.Transaction.posted_on > last_seen.posted_on,
+                same_direction,
+            )
+        )
+        if arrived:
+            anomaly.status = AnomalyStatus.RESOLVED
+            resolved += 1
+    session.flush()
+    return resolved
+
+
+def list_anomalies(session: Session, entity_id: str, status: AnomalyStatus) -> list[orm.Anomaly]:
+    return list(
+        session.scalars(
+            select(orm.Anomaly).where(
+                orm.Anomaly.entity_id == entity_id, orm.Anomaly.status == status
+            )
+        )
+    )
+
+
+def get_anomaly(session: Session, entity_id: str, anomaly_id: int) -> orm.Anomaly | None:
+    """Scoped by entity: another entity's anomaly id is simply not found."""
+    return session.scalars(
+        select(orm.Anomaly).where(orm.Anomaly.entity_id == entity_id, orm.Anomaly.id == anomaly_id)
+    ).one_or_none()
+
+
+def prune_transactions(session: Session, entity_id: str, keep_source_ids: set[str]) -> int:
+    """Delete the entity's transactions not in `keep_source_ids`; for sources that own the
+    entity's full history (the demo seeder). Returns how many were deleted."""
+    deleted = session.execute(
+        delete(orm.Transaction)
+        .where(
+            orm.Transaction.entity_id == entity_id,
+            orm.Transaction.source_id.not_in(keep_source_ids),
+        )
+        .returning(orm.Transaction.id)
+    )
+    return len(deleted.all())
+
+
+def delete_anomalies(session: Session, entity_id: str) -> None:
+    session.execute(delete(orm.Anomaly).where(orm.Anomaly.entity_id == entity_id))

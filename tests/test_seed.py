@@ -1,10 +1,13 @@
-from datetime import date
+from datetime import UTC, date, datetime
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from cashflow.core.models import Transaction
 from cashflow.db import models as orm
+from cashflow.db.repositories import upsert_transactions
 from cashflow.demo.seed import seed
 from cashflow.settings import Settings
 
@@ -35,3 +38,28 @@ def test_seed_detects_recurring_series(session: Session) -> None:
 
     stored = session.scalar(select(func.count()).select_from(orm.RecurringSeries))
     assert stored == results[0].recurring_series > 0
+
+
+def test_reseeding_prunes_rows_an_older_generator_produced(session: Session) -> None:
+    seed(session, entities=1, base_seed=1, as_of=AS_OF, settings=Settings(_env_file=None))
+    stale = Transaction(
+        entity_id="demo-1",
+        source_id="demo-1-txn-99999",
+        account_id="a",
+        posted_on=AS_OF,
+        amount=Decimal("-1.00"),
+        description="",
+        vendor="Gone",
+        category="Gone",
+    )
+    upsert_transactions(session, [stale], source_updated_at=datetime.now(UTC))
+
+    (result,) = seed(
+        session, entities=1, base_seed=1, as_of=AS_OF, settings=Settings(_env_file=None)
+    )
+
+    assert result.pruned == 1
+    gone = session.scalar(
+        select(orm.Transaction).where(orm.Transaction.source_id == stale.source_id)
+    )
+    assert gone is None

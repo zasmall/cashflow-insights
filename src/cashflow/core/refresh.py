@@ -1,13 +1,12 @@
-"""Recompute an entity's derived data (recurring series, forecast) from its transactions.
-
-M5 adds the anomaly scan here, so one call refreshes everything after new transactions arrive.
-"""
+"""Recompute an entity's derived data from its transactions: recurring series, the forecast,
+and the anomaly scan. One call refreshes everything after new transactions arrive."""
 
 from dataclasses import dataclass
 from datetime import date
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from cashflow.core.anomalies import scan
 from cashflow.core.forecast import ForecastRun, build_forecast
 from cashflow.core.recurring import DetectedSeries, detect_recurring
 from cashflow.db import repositories
@@ -23,6 +22,7 @@ class RefreshResult:
     entity_id: str
     series: list[DetectedSeries]
     forecast: ForecastRun
+    anomalies: repositories.AnomalySyncResult
 
 
 def refresh_recurring(
@@ -47,7 +47,9 @@ def refresh_entity(
         history, as_of=as_of, recurring=settings.recurring, forecast=settings.forecast
     )
     repositories.save_forecast(session, entity_id, run)
-    return RefreshResult(entity_id, series, run)
+    findings = scan(history.transactions, series, as_of=as_of, settings=settings.anomaly)
+    anomalies = repositories.sync_anomalies(session, entity_id, findings)
+    return RefreshResult(entity_id, series, run, anomalies)
 
 
 def refresh_if_dirty(

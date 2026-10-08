@@ -3,7 +3,8 @@
     uv run python -m cashflow.demo.seed [--entities 2] [--seed 42] [--as-of 2026-10-08]
 
 Idempotent: generated ids are deterministic, so re-running with the same arguments writes no
-transactions. Recurring series and forecasts are recomputed each run.
+transactions. Rows an older generator produced are pruned. Recurring series, forecasts, and
+anomalies are recomputed each run.
 """
 
 import argparse
@@ -13,7 +14,12 @@ from datetime import UTC, date, datetime
 from sqlalchemy.orm import Session
 
 from cashflow.core.refresh import refresh_entity
-from cashflow.db.repositories import upsert_entity, upsert_transactions
+from cashflow.db.repositories import (
+    delete_anomalies,
+    prune_transactions,
+    upsert_entity,
+    upsert_transactions,
+)
 from cashflow.db.session import make_engine, make_session_factory, session_scope
 from cashflow.demo.generator import DEFAULT_MONTHS, generate
 from cashflow.settings import Settings, get_settings
@@ -25,6 +31,7 @@ class SeededEntity:
     name: str
     transactions: int
     written: int
+    pruned: int
     recurring_series: int
     forecast_model: str
 
@@ -50,6 +57,13 @@ def seed(
             # lets a changed generator overwrite older rows; identical rows still write nothing.
             source_updated_at=datetime.now(UTC),
         )
+        # The seeder owns these entities' whole history, so rows an older generator produced
+        # are stale. Their anomalies may cite deleted rows; the refresh below recreates them.
+        pruned = prune_transactions(
+            session, dataset.entity.id, {t.source_id for t in dataset.transactions}
+        )
+        if pruned:
+            delete_anomalies(session, dataset.entity.id)
         refreshed = refresh_entity(session, dataset.entity.id, as_of=as_of, settings=settings)
         results.append(
             SeededEntity(
@@ -57,6 +71,7 @@ def seed(
                 dataset.entity.name,
                 len(dataset.transactions),
                 written,
+                pruned,
                 len(refreshed.series),
                 refreshed.forecast.model.value,
             )
@@ -94,7 +109,8 @@ def main(argv: list[str] | None = None) -> None:
 
     for r in results:
         print(
-            f"{r.entity_id}  {r.name:<28} {r.transactions:>5} transactions ({r.written} written), "
+            f"{r.entity_id}  {r.name:<28} {r.transactions:>5} transactions "
+            f"({r.written} written, {r.pruned} pruned), "
             f"{r.recurring_series} recurring series, forecast with {r.forecast_model}"
         )
 
