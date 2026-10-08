@@ -13,6 +13,7 @@ cp .env.example .env
 uv sync
 docker compose up -d
 uv run alembic upgrade head
+uv run python -m cashflow.demo.seed   # two synthetic businesses, 24 months each
 ```
 
 Checks (all run in CI):
@@ -23,4 +24,4 @@ uv run mypy
 uv run pytest
 ```
 
-Tests marked `db` need Postgres; they skip locally when it isn't running and fail in CI.
+Tests marked `db` run against a separate `cashflow_test` database, recreated and migrated on each run, so they never touch dev data. They skip locally when Postgres isn't running and fail in CI.
