@@ -19,6 +19,7 @@ class WebhookSettings(BaseModel):
 
     secret: SecretStr = SecretStr("")
     signature_tolerance_seconds: PositiveInt = 300
+    max_body_bytes: PositiveInt = 256 * 1024
 
 
 class RecurringSettings(BaseModel):

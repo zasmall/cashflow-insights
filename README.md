@@ -9,11 +9,12 @@ Ingests categorized bank transactions, forecasts cash flow 30/60/90 days out wit
 Requires [uv](https://docs.astral.sh/uv/) and Docker.
 
 ```bash
-cp .env.example .env
+cp .env.example .env                  # then set WEBHOOK__SECRET (the API won't start without it)
 uv sync
 docker compose up -d
 uv run alembic upgrade head
 uv run python -m cashflow.demo.seed   # two synthetic businesses, 24 months each
+uv run fastapi dev src/cashflow/api/main.py
 ```
 
 Checks (all run in CI):

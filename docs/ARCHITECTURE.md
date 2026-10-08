@@ -14,7 +14,22 @@ Transaction Categorizer ──(transaction.categorized)──▶ Webhook Relay �
 
 ## Inbound contract
 
-Event type `transaction.categorized`. The payload must be agreed with the categorizer:
+The relay POSTs a JSON envelope around the source system's payload:
+
+```json
+{
+  "id": "evt_...",
+  "type": "transaction.categorized",
+  "created_at": "2026-10-01T14:03:22Z",
+  "data": { ... }
+}
+```
+
+Headers: `X-Relay-Signature` (below), plus `X-Relay-Event-Id`, `X-Relay-Event-Type` and `X-Relay-Delivery-Id`. Those three headers are informational only; we use the body's `id` and `type`, because the body is signed and they are not.
+
+**Signature:** `t=<unix>,v1=<hex HMAC-SHA256 of "{t}.{raw_body}">`, with one `v1` per active secret while the relay rotates secrets. We accept the request if any `v1` matches, ignore unknown schemes such as `v2`, and reject timestamps outside the tolerance window (300 s by default). A test vector produced by the relay's own PHP signer pins compatibility.
+
+For `transaction.categorized`, `data` must be agreed with the categorizer:
 
 ```json
 {
@@ -41,8 +56,8 @@ Negative amounts are outflows. Amounts are decimal strings and never floats.
 | Table | Key columns | Notes |
 |---|---|---|
 | `entities` | id, name, currency, opening_balance, opening_balance_on | One client business. `id` is the upstream id; `currency` is ISO 4217 |
-| `inbound_events` | relay_event_id (unique), type, payload (JSONB), received_at, processed_at | Dedupe log; raw payload kept for replay and debugging |
-| `transactions` | id, entity_id, source_id, account_id, posted_on, amount, vendor, category, description | Upsert on unique `(entity_id, source_id)` |
+| `inbound_events` | relay_event_id (unique), type, payload (JSONB), status, entity_id, error, received_at, processed_at | Dedupe log and outcome. `entity_id` has no FK so events for unprovisioned entities can be kept |
+| `transactions` | id, entity_id, source_id, account_id, posted_on, amount, vendor, category, description, source_updated_at | Upsert on unique `(entity_id, source_id)`; never replaced by an older version |
 | `recurring_series` | id, entity_id, vendor, typical_amount, cadence, next_expected_on, last_seen_on | Detected recurring bills/income; recomputed per entity, so no natural key |
 | `forecasts` | id, entity_id, generated_at, horizon_days, model, backtest_mase | Header row per run |
 | `forecast_points` | (forecast_id, on_date), expected_balance, lower, upper | Daily points; CHECK `lower <= expected <= upper` |
@@ -58,10 +73,39 @@ Conventions:
 
 ## Ingest flow
 
-1. Read the raw body and verify the signature, rejecting with 401 on failure.
-2. Insert into `inbound_events`. A duplicate `relay_event_id` returns 200 without reprocessing.
-3. Validate the payload with Pydantic and upsert the transaction.
-4. Mark the entity dirty, so recurring detection, the forecast, and the anomaly scan re-run. Start with FastAPI `BackgroundTasks`; this is noted as a scaling limit in the README.
+`POST /webhooks/relay`:
+
+1. Read the raw body, capped at `WEBHOOK__MAX_BODY_BYTES`, and verify the signature *before* parsing anything.
+2. Parse the envelope.
+3. In **one database transaction**:
+   1. Insert into `inbound_events` (`ON CONFLICT DO NOTHING`). If the event was already received, answer with its original status and `duplicate: true`.
+   2. Decide the outcome:
+      - unsupported type → `ignored`
+      - payload fails validation → `invalid`
+      - entity not provisioned → `unknown_entity`
+      - currency differs from the entity's → `invalid`
+      - otherwise upsert the transaction → `processed`
+   3. Record the status (and the error, for `invalid`), then commit before responding.
+
+Because recording and applying commit together, a crash mid-ingest leaves no dedupe record, so the relay's retry is processed normally instead of being dropped as a duplicate. Concurrent deliveries of the same event serialize on the unique index.
+
+**Out-of-order delivery:** retries mean an older event can arrive after a newer one. Each transaction keeps `source_updated_at`, taken from the envelope's signed `created_at`, and the upsert only replaces a row with a version at least as new. A delayed retry therefore can't undo a later recategorization.
+
+**Responses** follow the relay's retry policy, where any 2xx is final, 410 disables the endpoint, and every other status is retried with backoff and counts toward its circuit breaker:
+
+| Case | Status |
+|---|---|
+| processed, duplicate, ignored, invalid, unknown entity | 200 `{"status": ..., "duplicate": bool}` |
+| missing, malformed, stale, or mismatched signature | 401 |
+| signed body that isn't a relay envelope | 400 |
+| body over the size limit | 413 |
+| unexpected server error (nothing committed) | 500 |
+
+Problems that a retry can't fix answer 200 and are recorded with a reason, so one bad event can't trip the relay's breaker and pause every delivery. We never send 410.
+
+**Unknown entities:** entities are provisioned here (for now, by the seeder) rather than created from events. Events for an unknown entity are stored as `unknown_entity` with their payload, ready to be reprocessed once it exists.
+
+**Recompute trigger:** marking the entity dirty, so recurring detection, the forecast, and the anomaly scan re-run, arrives with M4/M5, when there is something to recompute. It starts with FastAPI `BackgroundTasks`, noted as a scaling limit in the README.
 
 ## Forecasting
 
