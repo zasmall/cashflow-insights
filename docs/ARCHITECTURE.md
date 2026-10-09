@@ -103,7 +103,7 @@ Conventions:
 
 Because recording and applying commit together, a crash mid-ingest leaves no dedupe record, so the relay's retry is processed normally instead of being dropped as a duplicate. Concurrent deliveries of the same event serialize on the unique index.
 
-**Out-of-order delivery:** retries mean an older event can arrive after a newer one. Each transaction keeps `source_updated_at`, taken from the envelope's signed `created_at`, and the upsert only replaces a row with a version at least as new. A delayed retry therefore can't undo a later recategorization.
+**Out-of-order delivery:** retries mean an older event can arrive after a newer one. Each transaction keeps `source_updated_at`, taken from the payload's `categorized_at` (the source's clock, not the relay's receive time; see Versioning above), and the upsert only replaces a row with a version at least as new. A delayed retry therefore can't undo a later recategorization.
 
 **Responses** follow the relay's retry policy, where any 2xx is final, 410 disables the endpoint, and every other status is retried with backoff and counts toward its circuit breaker:
 
@@ -119,7 +119,7 @@ Problems that a retry can't fix answer 200 and are recorded with a reason, so on
 
 **Unknown entities:** entities are provisioned here (`python -m cashflow.entities add`, with the opening balance a forecast starts from, which the categorizer doesn't know) rather than created from events. Events for an unknown entity are stored as `unknown_entity` with their payload. Provisioning applies them, oldest first, in the same transaction, then refreshes the entity. Their `categorized_at` keeps replay order from mattering.
 
-**Recompute trigger:** when a processed event actually changes a transaction, ingest sets `entities.dirty_since` in the same transaction. After the response, a FastAPI `BackgroundTasks` job claims the entity atomically (`UPDATE ... SET dirty_since = NULL WHERE dirty_since IS NOT NULL RETURNING`) and refreshes it: recurring detection, then the forecast, and from M5 the anomaly scan. The claim and the refresh share one transaction:
+**Recompute trigger:** when a processed event actually changes a transaction, ingest sets `entities.dirty_since` in the same transaction. After the response, a FastAPI `BackgroundTasks` job claims the entity atomically (`UPDATE ... SET dirty_since = NULL WHERE dirty_since IS NOT NULL RETURNING`) and refreshes it: recurring detection, then the forecast, then the anomaly scan. The claim and the refresh share one transaction:
 
 - **Bursts:** of many events for one entity, one task wins the claim and the rest do nothing. An event that lands mid-refresh re-marks the entity for the next task.
 - **Failures:** if a refresh fails, the claim rolls back too, so the entity stays dirty.
@@ -129,7 +129,7 @@ Problems that a retry can't fix answer 200 and are recorded with a reason, so on
 
 `core.forecast.build_forecast` is pure: it takes an entity's history and returns a run with one fitted model and a forecast for each configured horizon (30/60/90 days). `refresh_entity` stores it. The pipeline at any cutoff date:
 
-1. **Known flows:** detect recurring series (below) in the history up to the cutoff and project them over the horizon on their cadence and anchor day, at `typical_amount`. Overdue series resume from their next scheduled date, so the forecast assumes bills continue, the cautious choice for cash planning; M5 flags the miss. Known flows are treated as certain. A recent price change is projected at the median (old) amount until it becomes the norm; M5 flags it.
+1. **Known flows:** detect recurring series (below) in the history up to the cutoff and project them over the horizon on their cadence and anchor day, at `typical_amount`. Overdue series resume from their next scheduled date, so the forecast assumes bills continue, the cautious choice for cash planning; the anomaly scan flags the miss. Known flows are treated as certain. A recent price change is projected at the median (old) amount until it becomes the norm; the anomaly scan flags it.
 2. **Residual flows:** every transaction from a (vendor, direction) without a series, summed per day with zeros for quiet days, forecast by a statsforecast model with a prediction interval.
 3. **Balance:** starting balance (opening balance plus all transactions to date) plus cumulative (known + residual mean). For the band, the model's one-step interval gives a daily standard deviation, and days are treated as independent and equally uncertain, so the band grows with √days.
 
@@ -169,9 +169,9 @@ The forecast earns its keep further out, where known bills, income, and trend ad
 Details that matter:
 
 - **Annual needs only two charges**, or annual bills would take three years to appear. Because two charges is thin evidence, their amounts must be identical. Real subscriptions repeat exactly; two similar flights a year apart don't.
-- **Price changes don't break a series.** The median keeps the old amount until the new one is the majority, so M5 can flag the change. With very short histories (under about 12 months), two raised charges can be more than 25% of the series, and it drops out until history builds.
+- **Price changes don't break a series.** The median keeps the old amount until the new one is the majority, so the anomaly scan can flag the change. With very short histories (under about 12 months), two raised charges can be more than 25% of the series, and it drops out until history builds.
 - **Calendar cadences have an anchor day,** the day of month that explains the most charges. A month-end charge fits any later anchor, so a bill on the 31st, or an annual bill on Feb 29, is predicted back on its true day after short months.
-- **Ended series are dropped** after `max_missed_cycles`, so a cancelled subscription doesn't raise missed-bill alerts forever. A recently missed bill stays, so M5 can flag it.
+- **Ended series are dropped** after `max_missed_cycles`, so a cancelled subscription doesn't raise missed-bill alerts forever. A recently missed bill stays, so the anomaly scan can flag it.
 - `refresh_recurring` replaces an entity's stored series in one transaction. Series ids aren't stable across runs, so anomaly fingerprints use vendor and dates instead.
 
 **Known limitations** (candidates for "what I'd do next"):
