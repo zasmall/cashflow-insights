@@ -255,7 +255,7 @@ def _upcoming(series: Sequence[DetectedSeries], today: date) -> list[UpcomingIte
     """Scheduled in the next week. Overdue charges are skipped: they're anomalies, not plans."""
     window = (today + timedelta(days=1), today + timedelta(days=UPCOMING_DAYS))
     items = [
-        UpcomingItem(on_date=day, vendor=s.vendor, cadence=s.cadence, amount=s.typical_amount)
+        UpcomingItem(on_date=day, vendor=s.vendor, cadence=s.cadence, amount=s.projected_amount)
         for s in series
         for day in s.occurrences_between(*window)
     ]

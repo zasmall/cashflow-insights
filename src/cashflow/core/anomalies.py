@@ -269,9 +269,9 @@ def missed_recurring(ctx: _Context, series: Sequence[DetectedSeries]) -> list[Fi
             ctx.finding(
                 AnomalyType.MISSED_RECURRING,
                 s.vendor,
-                impact=abs(s.typical_amount) * missed,
+                impact=abs(s.projected_amount) * missed,
                 explanation=f"{s.vendor}'s {s.cadence.value} {noun} of "
-                f"{_money(s.typical_amount)} was expected on {_day(due)} and hasn't arrived "
+                f"{_money(s.projected_amount)} was expected on {_day(due)} and hasn't arrived "
                 f"({missed} expected {noun}{'s' if missed != 1 else ''} missed; last seen "
                 f"{_day(s.last_seen_on)}).",
                 evidence=[last] if last else [],

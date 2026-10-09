@@ -236,3 +236,20 @@ def test_anomaly_digest_ranks_counts_and_marks_new() -> None:
     assert [a.id for a in digest.top] == [3, 2, 4, 1, 8]
     assert digest.new_count == 2
     assert {a.id for a in digest.top if a.new} == {3, 4}
+
+
+def test_upcoming_uses_a_confirmed_new_price() -> None:
+    adobe = DetectedSeries(
+        "Adobe",
+        Cadence.MONTHLY,
+        Decimal("-89.99"),
+        12,
+        date(2026, 9, 12),
+        date(2026, 10, 12),
+        12,
+        changed_amount=Decimal("-104.99"),
+    )
+
+    (item,) = summarize([], [adobe]).upcoming
+
+    assert item.amount == Decimal("-104.99")

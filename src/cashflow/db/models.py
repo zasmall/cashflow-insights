@@ -94,6 +94,8 @@ class RecurringSeries(TimestampMixin, Base):
     entity_id: Mapped[EntityFk] = mapped_column(index=True)
     vendor: Mapped[str] = mapped_column(String(200))
     typical_amount: Mapped[Money]
+    # The amount to expect next: typical_amount, or a new price confirmed by recent charges.
+    projected_amount: Mapped[Money]
     cadence: Mapped[Cadence] = mapped_column(str_enum(Cadence, "cadence"))
     next_expected_on: Mapped[date]
     last_seen_on: Mapped[date]

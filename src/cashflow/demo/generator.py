@@ -16,6 +16,7 @@ from statistics import median
 from cashflow.core.calendar import add_months
 from cashflow.core.enums import AnomalyType, Cadence
 from cashflow.core.models import Entity, Transaction
+from cashflow.core.recurring import CONFIRMING_CHARGES
 
 CENT = Decimal("0.01")
 MIN_MONTHS = 6
@@ -61,6 +62,8 @@ class ExpectedSeries:
     cadence: Cadence
     typical_amount: Decimal
     occurrences: int
+    projected_amount: Decimal
+    """The planted new price once enough charges confirm it, else the typical amount."""
 
 
 @dataclass(frozen=True)
@@ -427,10 +430,20 @@ class _Generator:
     def _expected_series(self, specs: tuple[_RecurringSpec, ...]) -> tuple[ExpectedSeries, ...]:
         # A short history can miss a long cadence entirely (an annual bill); omit those.
         return tuple(
-            ExpectedSeries(s.vendor, s.cadence, s.amount, n)
+            ExpectedSeries(s.vendor, s.cadence, s.amount, n, self._planted_price(s))
             for s in specs
             if (n := len(self._by_vendor(s.vendor)))
         )
+
+    def _planted_price(self, spec: _RecurringSpec) -> Decimal:
+        """The latest price if the newest CONFIRMING_CHARGES or more charges were re-priced."""
+        charges = sorted(self._by_vendor(spec.vendor), key=lambda d: d.posted_on)
+        repriced = 0
+        for draft in reversed(charges):
+            if draft.amount == spec.amount:
+                break
+            repriced += 1
+        return charges[-1].amount if repriced >= CONFIRMING_CHARGES else spec.amount
 
     def _planted(self, ids_by_draft: dict[int, str]) -> tuple[PlantedAnomaly, ...]:
         evidence: dict[AnomalyType, list[_Draft]] = defaultdict(list)

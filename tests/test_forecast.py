@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 from decimal import Decimal
+from itertools import pairwise
 from statistics import fmean
 
 import pytest
@@ -211,3 +212,20 @@ def test_real_balance_usually_lands_inside_the_band(
     held_out: dict[int, dict[str, list[float]]], days: int
 ) -> None:
     assert fmean(held_out[days]["inside"]) >= 0.7
+
+
+def test_a_confirmed_price_change_is_forecast_at_the_new_price() -> None:
+    """A retainer that rose from $3,000 to $3,600 two months ago is projected at $3,600."""
+    retainer = [
+        txn(
+            date(2025 + (m // 12), m % 12 + 1, 5), "3000.00" if m < 19 else "3600.00", "Retainer", m
+        )
+        for m in range(21)
+    ]
+    h = History(retainer, Decimal("10000.00"), date(2024, 12, 31))
+
+    run = build_forecast(h, as_of=date(2026, 9, 30), recurring=RECURRING, forecast=FORECAST)
+
+    steps = [b.expected - a.expected for a, b in pairwise(run.horizon(30).points)]
+    assert Decimal("3600.00") in steps
+    assert Decimal("3000.00") not in steps

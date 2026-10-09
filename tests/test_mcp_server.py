@@ -134,6 +134,8 @@ async def test_list_recurring(client: Client) -> None:
     series = (await call(client, "list_recurring", entity_id="demo-1"))["result"]
 
     assert {"Adobe", "Gusto Payroll", "Parkside Properties"} <= {s["vendor"] for s in series}
+    adobe = next(s for s in series if s["vendor"] == "Adobe")
+    assert (adobe["typical_amount"], adobe["projected_amount"]) == ("-89.99", "-104.99")
     dates = [s["next_expected_on"] for s in series]
     assert dates == sorted(dates)
 

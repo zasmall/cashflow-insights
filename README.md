@@ -42,7 +42,7 @@ Three portfolio repos, each runnable alone, connected end to end: [Transaction C
 ## How the forecast works, and how good it is
 
 1. **Detect recurring series** per vendor and direction: a stable median amount, regular calendar-aware timing, enough evidence, and not ended. Recall is exact against the demo generator's ground truth across thousands of random businesses.
-2. **Project them** over the horizon on their anchor day (bills on the 31st land on the 30th in short months).
+2. **Project them** over the horizon on their anchor day (bills on the 31st land on the 30th in short months), at their latest price once two consecutive charges confirm a change.
 3. **Model the residual** (everything else, summed daily) with statsforecast, then build the balance band from the model's one-step spread, growing with √days.
 4. **Backtest end to end** at three past cutoffs, re-running detection on only the data available then, and **choose the model with the lowest balance error**.
 
@@ -140,7 +140,6 @@ Unit and property tests (Hypothesis) cover signatures, recurring detection, anom
 - **API keys** for the report endpoints; today only the webhook is authenticated.
 - **A durable job queue** (such as Postgres `SKIP LOCKED` or Redis) in place of in-process background tasks, which is the scaling limit. The dirty flag already makes recovery safe.
 - **Close the approved-only gap.** Only approved categorizations are published, so transactions awaiting review are missing from the balance. A `transaction.imported` event would fix it.
-- **Project known price changes at the new amount.** A series keeps its old median price until the new one is the majority. That is good for flagging the change, but it underestimates the bill meanwhile. Claude spotted this in the [example session](docs/EXAMPLE_SESSION.md).
 - **Tell apart two subscriptions from one vendor** (for example $89.99 and $22.99 monthly), which today split the amounts so neither is detected. This needs an amount-clustering step that doesn't split ordinary price changes.
 - **Keep forecast history** to measure drift, rather than only the latest run.
 - **An admin UI** for provisioning businesses and reviewing anomalies.

@@ -94,6 +94,30 @@ def test_recent_price_increase_keeps_the_series_and_its_old_typical_amount() -> 
 
     assert found.typical_amount == Decimal("-89.99")
     assert found.last_seen_on == date(2025, 12, 12)
+    assert found.projected_amount == Decimal("-104.99"), "two charges confirm the new price"
+
+
+def price_history(*new_prices: str) -> list[Transaction]:
+    old = series(Cadence.MONTHLY, date(2025, 1, 12), 10)
+    return [*old, *(txn(date(2025, 11 + k, 12), p, n=k) for k, p in enumerate(new_prices))]
+
+
+@pytest.mark.parametrize(
+    "new_prices",
+    [
+        pytest.param(("-104.99",), id="one-charge-is-not-enough"),
+        pytest.param(("-104.99", "-129.99"), id="new-charges-disagree"),
+        pytest.param(("-104.99", "-89.99"), id="reverted"),
+        pytest.param(("-95.00", "-95.00"), id="within-tolerance"),
+    ],
+)
+def test_unconfirmed_changes_keep_projecting_the_typical_amount(
+    new_prices: tuple[str, ...],
+) -> None:
+    (found,) = detect(price_history(*new_prices))
+
+    assert found.changed_amount is None
+    assert found.projected_amount == found.typical_amount == Decimal("-89.99")
 
 
 def test_one_skipped_charge_does_not_break_a_series() -> None:
@@ -181,6 +205,7 @@ def test_regular_series_is_recovered(
     assert found.cadence is cadence
     assert abs(found.typical_amount - base) <= abs(base) * SETTINGS.amount_tolerance
     assert abs((found.next_expected_on - nth(cadence, start, count)).days) <= 1
+    assert found.changed_amount is None, "noise within tolerance isn't a price change"
 
 
 @given(cadences, starts, st.integers(2, 12))
@@ -235,11 +260,11 @@ def test_generator_ground_truth_is_recovered_exactly(seed: int, as_of: date, mon
     """
     ds = generate(seed, as_of, months)
     expected = {
-        (s.vendor, s.cadence, s.typical_amount)
+        (s.vendor, s.cadence, s.typical_amount, s.projected_amount)
         for s in ds.recurring
         if s.occurrences >= SETTINGS.min_occurrences[s.cadence]
     }
 
     found = detect_recurring(ds.transactions, as_of=as_of, settings=SETTINGS)
 
-    assert {(s.vendor, s.cadence, s.typical_amount) for s in found} == expected
+    assert {(s.vendor, s.cadence, s.typical_amount, s.projected_amount) for s in found} == expected

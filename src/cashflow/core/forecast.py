@@ -224,7 +224,7 @@ def _inputs(history: History, cutoff: date, horizon: int, recurring: RecurringSe
     known = [0.0] * horizon
     for s in series:
         for day in s.occurrences_between(cutoff + timedelta(days=1), cutoff + timedelta(horizon)):
-            known[(day - cutoff).days - 1] += float(s.typical_amount)
+            known[(day - cutoff).days - 1] += float(s.projected_amount)
 
     # A vendor's whole flow in a direction is "known" once it has a series, matching detection.
     recurring_keys = {(s.vendor, s.typical_amount > 0) for s in series}

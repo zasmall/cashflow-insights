@@ -12,6 +12,11 @@ One candidate series per (vendor, direction). A candidate is recurring when:
    two (annual), both amounts must be identical.
 4. **It hasn't ended:** no more than `max_missed_cycles` expected charges have been missed.
 
+Price changes: the typical amount stays the median, so the anomaly scan can compare against it.
+Looking forward, though, a change confirmed by `CONFIRMING_CHARGES` consecutive charges at a
+new price (outside `amount_tolerance` of typical, within it of each other) is projected at the
+latest amount. One odd charge, like a prorated bill, moves nothing until a second confirms it.
+
 Known limitation: two subscriptions from one vendor (say $89.99 and $22.99 monthly) split the
 amounts so neither reaches the stable share, and neither is reported.
 """
@@ -31,6 +36,7 @@ from cashflow.core.models import Transaction
 from cashflow.settings import RecurringSettings
 
 CENT = Decimal("0.01")
+CONFIRMING_CHARGES = 2
 AVERAGE_MONTH_DAYS = 365.25 / 12
 
 NOMINAL_DAYS: dict[Cadence, float] = {
@@ -55,6 +61,13 @@ class DetectedSeries:
     next_expected_on: date
     anchor_day: int | None
     """Day of month for calendar cadences; None for weekly and biweekly."""
+    changed_amount: Decimal | None = None
+    """A confirmed new price, when the latest charges have moved away from `typical_amount`."""
+
+    @property
+    def projected_amount(self) -> Decimal:
+        """What future charges should be expected to cost."""
+        return self.typical_amount if self.changed_amount is None else self.changed_amount
 
     def occurrences_between(self, start: date, end: date) -> list[date]:
         """Scheduled dates in [start, end]. Overdue charges before `start` are skipped."""
@@ -116,6 +129,7 @@ def _candidates(frame: pl.DataFrame, settings: RecurringSettings) -> pl.DataFram
             amount_share=pl.col("amount_fits").mean(),
             median_gap=pl.col("gap_days").median(),
             dates=pl.col("posted_on"),
+            amounts=pl.col("cents"),
             distinct_amounts=pl.col("cents").n_unique(),
         )
         .filter(pl.col("amount_share") >= settings.min_consistent_share)
@@ -151,6 +165,7 @@ def _classify(
     if _missed_cycles(cadence, next_expected, as_of) > settings.max_missed_cycles:
         return None
 
+    changed = _confirmed_change(row["amounts"], row["median_cents"], settings)
     return DetectedSeries(
         vendor=row["vendor"],
         cadence=cadence,
@@ -159,7 +174,26 @@ def _classify(
         last_seen_on=dates[-1],
         next_expected_on=next_expected,
         anchor_day=None if cadence in _STEP_DAYS else anchor_day,
+        changed_amount=None if changed is None else Decimal(changed) * CENT,
     )
+
+
+def _confirmed_change(
+    amounts: list[int], median_cents: float, settings: RecurringSettings
+) -> int | None:
+    """The latest amount, if the newest charges agree on a price outside tolerance of typical."""
+    tolerance = float(settings.amount_tolerance)
+    changed: list[int] = []
+    for cents in reversed(amounts):
+        if abs(cents - median_cents) <= abs(median_cents) * tolerance:
+            break
+        changed.append(cents)
+    if len(changed) < CONFIRMING_CHARGES:
+        return None
+    latest = changed[0]
+    if any(abs(cents - latest) > abs(latest) * tolerance for cents in changed):
+        return None  # the new charges disagree with each other: no single new price yet
+    return latest
 
 
 def _anchor_day(dates: list[date]) -> int:

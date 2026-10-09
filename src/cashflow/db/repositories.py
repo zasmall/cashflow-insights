@@ -138,6 +138,7 @@ def replace_recurring_series(
                     "entity_id": entity_id,
                     "vendor": s.vendor,
                     "typical_amount": s.typical_amount,
+                    "projected_amount": s.projected_amount,
                     "cadence": s.cadence,
                     "next_expected_on": s.next_expected_on,
                     "last_seen_on": s.last_seen_on,

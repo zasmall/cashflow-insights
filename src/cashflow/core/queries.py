@@ -289,6 +289,8 @@ class RecurringOut(BaseModel):
     cadence: Cadence
     typical_amount: Decimal
     """Negative is a bill, positive is income."""
+    projected_amount: Decimal
+    """The amount to expect next: typical, or a new price confirmed by two charges."""
     last_seen_on: date
     next_expected_on: date
 
@@ -306,6 +308,7 @@ def list_recurring(session: Session, entity_id: str) -> list[RecurringOut]:
             vendor=s.vendor,
             cadence=s.cadence,
             typical_amount=s.typical_amount,
+            projected_amount=s.projected_amount,
             last_seen_on=s.last_seen_on,
             next_expected_on=s.next_expected_on,
         )

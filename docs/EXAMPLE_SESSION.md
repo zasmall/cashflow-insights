@@ -97,4 +97,4 @@ Neither anomaly has been dismissed yet. The MCP tools are read-only, so dismissi
 
 ---
 
-**About the "possible bug" in answer 1.** Claude noticed that the upcoming-bills list projects Adobe at $89.99 while an anomaly reports the new $104.99 price. That is deliberate but debatable: a recurring series keeps its median amount until the new price is the majority, so a price change is flagged instead of silently absorbed (see "Recurring detection" in [ARCHITECTURE.md](ARCHITECTURE.md)). Projecting known price changes at their new amount is on the README's "what I'd do next" list.
+**About the "possible bug" in answer 1.** Claude was right. The upcoming-bills list projected Adobe at its old $89.99 median even though two charges had confirmed the new $104.99 price. That is fixed since this session was recorded: a series still keeps its median as `typical_amount`, so the anomaly can flag the change, but once two consecutive charges confirm a new price it becomes the series' `projected_amount`, which the forecast, the upcoming list, and missed-bill explanations use (see "Recurring detection" in [ARCHITECTURE.md](ARCHITECTURE.md)). The session above is kept as recorded.

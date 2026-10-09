@@ -374,3 +374,21 @@ def test_generator_ground_truth_is_found_exactly(seed: int, as_of: date, months:
     for planted in ds.anomalies:
         (match,) = [f for f in findings if f.type is planted.type]
         assert set(planted.source_ids) <= set(match.source_ids)
+
+
+def test_missed_bill_expects_a_confirmed_new_price() -> None:
+    charges, series = monthly_series("Adobe", "-89.99", date(2026, 8, 12))
+    repriced = DetectedSeries(
+        series.vendor,
+        series.cadence,
+        series.typical_amount,
+        series.occurrences,
+        series.last_seen_on,
+        series.next_expected_on,
+        series.anchor_day,
+        changed_amount=Decimal("-104.99"),
+    )
+
+    (missed,) = of_type(found(charges, [repriced]), AnomalyType.MISSED_RECURRING)
+
+    assert "monthly charge of $104.99 was expected" in missed.explanation
