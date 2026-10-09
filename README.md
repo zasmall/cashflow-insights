@@ -19,7 +19,7 @@ Transaction Categorizer ──transaction.categorized──▶ Webhook Relay ─
                                                                      REST API ◀── core services ──▶ MCP server ◀── Claude
 ```
 
-Three portfolio repos, each runnable alone, connected end to end: [Transaction Categorizer](https://github.com/zasmall/Transaction-categorizer) (Laravel) publishes every approved categorization; [Webhook Relay](https://github.com/zasmall/webhook-relay) (Laravel) delivers it at least once, signed; this service verifies it, stores it idempotently, and recomputes that business's recurring bills, forecast, and anomalies in the background. `scripts/e2e-demo.sh` runs the whole chain locally ([docs/DEMO.md](docs/DEMO.md)).
+Three portfolio repos, each runnable alone, connected end to end: [Transaction Categorizer](https://github.com/zasmall/transaction-categorizer) (Laravel) publishes every approved categorization; [Webhook Relay](https://github.com/zasmall/webhook-relay) (Laravel) delivers it at least once, signed; this service verifies it, stores it idempotently, and recomputes that business's recurring bills, forecast, and anomalies in the background. `scripts/e2e-demo.sh` runs the whole chain locally ([docs/DEMO.md](docs/DEMO.md)).
 
 ## What it produces
 

@@ -9,7 +9,7 @@ Transaction Categorizer ──POST /api/events──▶ Webhook Relay ──sign
 
 ## Prerequisites
 
-The three repos side by side (`~/Sites/learning/` here), each set up per its own README: MySQL and Redis for the relay, Redis for the categorizer, and Docker's Postgres for this app (`docker compose up -d`). The categorizer needs its publishing support, on `main` since [zasmall/Transaction-categorizer#1](https://github.com/zasmall/Transaction-categorizer/pull/1).
+The three repos side by side (`~/Sites/learning/` here), each set up per its own README: MySQL and Redis for the relay, Redis for the categorizer, and Docker's Postgres for this app (`docker compose up -d`). The categorizer needs its publishing support, on `main` since [zasmall/transaction-categorizer#1](https://github.com/zasmall/transaction-categorizer/pull/1).
 
 | App | Port | Start | Queue worker |
 |---|---|---|---|
