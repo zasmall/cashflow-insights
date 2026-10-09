@@ -32,6 +32,9 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.10",
 ]
+docs = [
+    "matplotlib>=3.11.2",
+]
 
 [tool.ruff]
 line-length = 100
@@ -76,7 +79,7 @@ runtime-evaluated-base-classes = [
 [tool.mypy]
 strict = true
 python_version = "3.13"
-files = ["src", "tests"]
+files = ["src", "tests", "scripts"]
 plugins = ["pydantic.mypy"]
 warn_unreachable = true
 

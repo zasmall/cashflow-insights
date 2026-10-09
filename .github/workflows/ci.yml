@@ -17,7 +17,7 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
-      - run: uv sync --locked
+      - run: uv sync --locked --group docs  # mypy also checks scripts/, which use matplotlib
       - name: Ruff
         run: |
           uv run ruff check --output-format=github .
