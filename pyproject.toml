@@ -3,6 +3,8 @@ name = "cashflow"
 version = "0.1.0"
 description = "Cash flow forecasting and anomaly detection over categorized transactions, with a FastAPI and MCP interface."
 readme = "README.md"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
 authors = [
     { name = "ZASmall", email = "zasmall@users.noreply.github.com" }
 ]
