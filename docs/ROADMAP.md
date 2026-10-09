@@ -46,5 +46,6 @@
 - [x] Version transactions by the source's `categorized_at`, not the relay's receive time
 
 ## M9 — Portfolio polish
-- [ ] README: problem, system diagram, forecasting approach and backtest accuracy, key decisions, how to run, "what I'd do next"
-- [ ] Forecast chart screenshot and a short clip of Claude using the MCP tools
+- [x] README: problem, system diagram, forecasting approach and backtest accuracy, key decisions, how to run, "what I'd do next"
+- [x] Forecast chart (`scripts/forecast_chart.py`, light and dark) and a real Claude session over the MCP tools as a text transcript (`docs/EXAMPLE_SESSION.md`) instead of a clip
+- [x] AGPL-3.0-or-later license
